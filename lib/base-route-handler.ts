@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb, ensureFirebaseInitialized } from '@/lib/firebase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse, forbiddenResponse } from '@/lib/auth-utils';
 import { UserRole } from '@/lib/types';
 
@@ -42,7 +42,8 @@ export class BaseRouteHandler {
     const authCheck = await this.requireAuth();
     if (authCheck) return authCheck;
 
-    const userDoc = await adminDb.collection('users').doc(this.authUser.uid).get();
+    const { adminDb: db } = ensureFirebaseInitialized();
+    const userDoc = await db.collection('users').doc(this.authUser.uid).get();
     if (!userDoc.exists || userDoc.data()?.role !== UserRole.ADMIN) {
       return forbiddenResponse('Admin access required');
     }
@@ -73,7 +74,8 @@ export class BaseRouteHandler {
    * Get a document by ID from a collection
    */
   protected async getDocumentById(collectionName: string, id: string) {
-    const doc = await adminDb.collection(collectionName).doc(id).get();
+    const { adminDb: db } = ensureFirebaseInitialized();
+    const doc = await db.collection(collectionName).doc(id).get();
     if (!doc.exists) {
       return null;
     }
@@ -84,6 +86,7 @@ export class BaseRouteHandler {
    * Create a new document in a collection
    */
   protected async createDocument(collectionName: string, data: any, docId?: string) {
+    const { adminDb: db } = ensureFirebaseInitialized();
     const now = new Date().toISOString();
     const documentData = {
       ...data,
@@ -92,10 +95,10 @@ export class BaseRouteHandler {
     };
 
     if (docId) {
-      await adminDb.collection(collectionName).doc(docId).set(documentData);
+      await db.collection(collectionName).doc(docId).set(documentData);
       return { id: docId, ...documentData };
     } else {
-      const docRef = adminDb.collection(collectionName).doc();
+      const docRef = db.collection(collectionName).doc();
       await docRef.set(documentData);
       return { id: docRef.id, ...documentData };
     }
@@ -105,11 +108,12 @@ export class BaseRouteHandler {
    * Update a document in a collection
    */
   protected async updateDocument(collectionName: string, id: string, data: any) {
+    const { adminDb: db } = ensureFirebaseInitialized();
     const updateData = {
       ...data,
       updated_at: new Date().toISOString(),
     };
-    await adminDb.collection(collectionName).doc(id).update(updateData);
+    await db.collection(collectionName).doc(id).update(updateData);
     return await this.getDocumentById(collectionName, id);
   }
 
@@ -117,11 +121,12 @@ export class BaseRouteHandler {
    * Delete a document from a collection
    */
   protected async deleteDocument(collectionName: string, id: string) {
-    const doc = await adminDb.collection(collectionName).doc(id).get();
+    const { adminDb: db } = ensureFirebaseInitialized();
+    const doc = await db.collection(collectionName).doc(id).get();
     if (!doc.exists) {
       return false;
     }
-    await adminDb.collection(collectionName).doc(id).delete();
+    await db.collection(collectionName).doc(id).delete();
     return true;
   }
 
@@ -129,7 +134,8 @@ export class BaseRouteHandler {
    * Build a query with filters
    */
   protected buildQuery(collectionName: string, filters: Record<string, any> = {}) {
-    let query: any = adminDb.collection(collectionName);
+    const { adminDb: db } = ensureFirebaseInitialized();
+    let query: any = db.collection(collectionName);
 
     for (const [key, value] of Object.entries(filters)) {
       if (value !== undefined && value !== null && value !== '') {
