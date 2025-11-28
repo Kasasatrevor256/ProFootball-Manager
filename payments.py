@@ -2,7 +2,7 @@ import csv
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# 1️⃣ Initialize Firebase
+
 cred = credentials.Certificate("key.json")  # <-- place your Firebase service account JSON here
 firebase_admin.initialize_app(cred)
 db = firestore.client()
