@@ -18,10 +18,10 @@ INSERT INTO users (
     updated_at
 ) VALUES (
     'Super Admin',
-    'admin@example.com',
+    'kasasatrevor25@gmail.com',
     'admin',
     'active',
-    crypt('admin123', gen_salt('bf', 10)),
+    crypt('Kasasa@3843.', gen_salt('bf', 10)),
     NOW(),
     NOW()
 )

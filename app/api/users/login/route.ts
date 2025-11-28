@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { successResponse, errorResponse } from '@/lib/auth-utils';
 import { LoginRequest, UserStatus } from '@/lib/types';
 import bcrypt from 'bcrypt';
@@ -13,19 +13,22 @@ export async function POST(request: NextRequest) {
       return errorResponse('Email and password are required', 400);
     }
 
-    // Get user from Firestore
-    const usersRef = adminDb.collection('users');
-    const snapshot = await usersRef.where('email', '==', email).limit(1).get();
+    // Get user from Supabase
+    const { data: users, error: queryError } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .limit(1);
 
-    if (snapshot.empty) {
+    if (queryError || !users || users.length === 0) {
       return errorResponse('Invalid credentials', 401);
     }
 
-    const userDoc = snapshot.docs[0];
-    const userData = userDoc.data();
+    const userData = users[0];
 
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, userData.passwordHash || '');
+    // Verify password using bcrypt
+    // PostgreSQL crypt() with 'bf' should produce bcrypt-compatible hash
+    const isValidPassword = await bcrypt.compare(password, userData.password_hash || '');
     if (!isValidPassword) {
       return errorResponse('Invalid credentials', 401);
     }
@@ -35,19 +38,21 @@ export async function POST(request: NextRequest) {
       return errorResponse('User account is not active', 401);
     }
 
-    // Create custom token for Firebase Auth
-    const customToken = await adminAuth.createCustomToken(userDoc.id, {
-      email: userData.email,
-      role: userData.role,
-    });
-
     // Return user data without password hash
-    const { passwordHash, ...userWithoutPassword } = userData;
+    const { password_hash, ...userWithoutPassword } = userData;
 
     return successResponse({
       message: 'Login successful',
-      user: { id: userDoc.id, ...userWithoutPassword },
-      token: customToken,
+      user: { 
+        id: userData.id, 
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+        status: userData.status,
+        createdAt: userData.created_at,
+        updatedAt: userData.updated_at,
+      },
+      token: 'supabase-session', // Placeholder - you may want to implement JWT tokens
     });
   } catch (error) {
     console.error('Login error:', error);
