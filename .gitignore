@@ -29,3 +29,6 @@ venv/
 # typescript
 *.tsbuildinfo
 next-env.d.tskey.json
+
+# git credentials (project-specific)
+.git/credentials

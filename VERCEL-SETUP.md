@@ -4,6 +4,19 @@
 
 Add these in **Vercel Dashboard → Settings → Environment Variables**:
 
+### Supabase Configuration (Public)
+```
+NEXT_PUBLIC_SUPABASE_URL=https://vcrhhvxnuiakoyiqcugq.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+```
+
+**To get your Supabase keys:**
+1. Go to your [Supabase Dashboard](https://app.supabase.com)
+2. Select your project
+3. Go to **Settings** → **API**
+4. Copy the **Project URL** (for `NEXT_PUBLIC_SUPABASE_URL`)
+5. Copy the **anon/public** key (for `NEXT_PUBLIC_SUPABASE_ANON_KEY`)
+
 ### Firebase Client Configuration (Public)
 ```
 NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyA2iI3qYZez8n45ETY4n-frxWq8BVN0G9Q
