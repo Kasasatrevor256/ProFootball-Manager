@@ -41,6 +41,14 @@ export async function POST(request: NextRequest) {
     // Return user data without password hash
     const { password_hash, ...userWithoutPassword } = userData;
 
+    // Create a simple token (user ID encoded in base64)
+    // In production, consider using proper JWT tokens
+    const token = Buffer.from(JSON.stringify({ 
+      userId: userData.id,
+      email: userData.email,
+      role: userData.role 
+    })).toString('base64');
+
     return successResponse({
       message: 'Login successful',
       user: { 
@@ -52,7 +60,7 @@ export async function POST(request: NextRequest) {
         createdAt: userData.created_at,
         updatedAt: userData.updated_at,
       },
-      token: 'supabase-session', // Placeholder - you may want to implement JWT tokens
+      token: token,
     });
   } catch (error) {
     console.error('Login error:', error);

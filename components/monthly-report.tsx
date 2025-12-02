@@ -217,162 +217,66 @@ export function MonthlyReport() {
     return allPayments
   }
 
-  // Load Monthly Report Data with Carryover
+  // Load Monthly Report Data from Backend API
   const loadReportData = async () => {
     try {
       setIsLoading(true)
       setError(null)
       
-      console.log("📊 Loading monthly report data with carryover...")
+      console.log("📊 Loading monthly report data from backend...")
 
-      // Fetch players
-      const playersResponse = await fetch(`${API_BASE_URL}/api/players?limit=100`, {
-        method: "GET",
-        headers: getAuthHeaders(),
-        credentials: "include",
-      })
+      // Fetch report data from backend API
+      const [year, month] = selectedMonth === "all" 
+        ? [new Date().getFullYear(), "all"]
+        : selectedMonth.split('-').map(Number)
 
-      if (!playersResponse.ok) {
-        const errorText = await playersResponse.text()
-        if (playersResponse.status === 401) {
+      const response = await fetch(
+        `${API_BASE_URL}/api/reports/monthly?year=${year}&month=${month}`,
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+          credentials: "include",
+        }
+      )
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        if (response.status === 401) {
           throw new Error("Authentication failed. Please log in again.")
         }
-        throw new Error(`Failed to fetch players: ${playersResponse.status} - ${errorText}`)
+        throw new Error(`Failed to fetch monthly report: ${response.status} - ${errorText}`)
       }
 
-      const players: Player[] = await playersResponse.json()
-      console.log(`✅ Loaded ${players.length} players`)
+      const apiData = await response.json()
+      console.log(`✅ Loaded report data for ${apiData.data.length} entries`)
 
-      // Fetch all payments
-      const allPayments = await fetchAllPayments()
-      console.log(`✅ Loaded ${allPayments.length} total payments`)
-
-      // Filter monthly payments from June 2025 onwards
-      const monthlyPayments = allPayments.filter(payment => {
-        const paymentDate = new Date(payment.date)
-        const isMonthly = payment.paymentType === "monthly"
-        const isAfterJuly2025 = paymentDate >= new Date(2025, 6, 1) // July 1, 2025
-        return isMonthly && isAfterJuly2025
-      })
-      console.log(`💳 Found ${monthlyPayments.length} monthly payments from July 2025 onwards`)
-
-      // Generate report data
-      const reportData: MonthlyReportData[] = []
-
-      if (selectedMonth === "all") {
-        // Show all months from June 2025 onwards
-        const monthsWithData = new Set<string>()
-        
-        // Add months from June 2025 to current month
-        const currentDate = new Date()
-        for (let year = 2025; year <= currentDate.getFullYear(); year++) {
-          const startMonth = year === 2025 ? 7 : 1 // July for 2025, January for other years
-          const endMonth = year === currentDate.getFullYear() ? currentDate.getMonth() + 1 : 12
-          
-          for (let month = startMonth; month <= endMonth; month++) {
-            const monthKey = `${year}-${String(month).padStart(2, '0')}`
-            monthsWithData.add(monthKey)
-          }
-        }
-
-        // For each player and each month, create a report entry
-        for (const player of players) {
-          for (const monthKey of Array.from(monthsWithData).sort()) {
-            const [year, month] = monthKey.split('-').map(Number)
-            const monthStart = new Date(year, month - 1, 1)
-            const monthEnd = new Date(year, month, 0, 23, 59, 59)
-            
-            const playerMonthlyPayments = monthlyPayments.filter(payment => {
-              const paymentDate = new Date(payment.date)
-              return payment.playerId === player.id && 
-                     paymentDate >= monthStart && 
-                     paymentDate <= monthEnd
-            })
-
-            // Calculate carryover for this month
-            const carryoverAmount = await calculateMonthlyCarryover(player.id, monthKey, allPayments)
-            
-            const baseAmount = player.monthly
-            const totalAmount = baseAmount + carryoverAmount
-            const amountPaid = playerMonthlyPayments.reduce((sum, payment) => sum + payment.amount, 0)
-            const balance = Math.max(0, totalAmount - amountPaid)
-            const status: "Complete" | "Incomplete" = balance <= 0 ? "Complete" : "Incomplete"
-            
-            const lastPaymentDate = playerMonthlyPayments.length > 0 
-              ? playerMonthlyPayments
-                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
-                  .date
-              : ""
-
-            const monthName = new Date(year, month - 1, 1)
-              .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-
-            reportData.push({
-              player,
-              month: monthName,
-              monthKey,
-              baseAmount,
-              carryoverAmount,
-              totalAmount,
-              amountPaid,
-              balance,
-              status,
-              lastPayment: lastPaymentDate,
-              paymentCount: playerMonthlyPayments.length
-            })
-          }
-        }
-      } else {
-        // Filter for specific month
-        const [year, month] = selectedMonth.split('-').map(Number)
-        const monthStart = new Date(year, month - 1, 1)
-        const monthEnd = new Date(year, month, 0, 23, 59, 59)
-        
-        console.log(`🗓️ Filtering for month: ${monthStart.toISOString()} to ${monthEnd.toISOString()}`)
-
-        const selectedMonthPayments = monthlyPayments.filter(payment => {
-          const paymentDate = new Date(payment.date)
-          return paymentDate >= monthStart && paymentDate <= monthEnd
-        })
-
-        console.log(`📅 Found ${selectedMonthPayments.length} payments for selected month`)
-
-        const monthName = new Date(year, month - 1, 1)
+      // Transform backend data to match frontend format
+      const reportData: MonthlyReportData[] = apiData.data.map((item: any) => {
+        const [yearStr, monthStr] = item.monthKey.split('-')
+        const yearNum = parseInt(yearStr)
+        const monthNum = parseInt(monthStr)
+        const monthName = new Date(yearNum, monthNum - 1, 1)
           .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
-        for (const player of players) {
-          const playerMonthlyPayments = selectedMonthPayments.filter(p => p.playerId === player.id)
-          
-          // Calculate carryover for this month
-          const carryoverAmount = await calculateMonthlyCarryover(player.id, selectedMonth, allPayments)
-          
-          const baseAmount = player.monthly
-          const totalAmount = baseAmount + carryoverAmount
-          const amountPaid = playerMonthlyPayments.reduce((sum, payment) => sum + payment.amount, 0)
-          const balance = Math.max(0, totalAmount - amountPaid)
-          const status: "Complete" | "Incomplete" = balance <= 0 ? "Complete" : "Incomplete"
-          
-          const lastPaymentDate = playerMonthlyPayments.length > 0 
-            ? playerMonthlyPayments
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
-                .date
-            : ""
-
-          reportData.push({
-            player,
-            month: monthName,
-            monthKey: selectedMonth,
-            baseAmount,
-            carryoverAmount,
-            totalAmount,
-            amountPaid,
-            balance,
-            status,
-            lastPayment: lastPaymentDate,
-            paymentCount: playerMonthlyPayments.length
-          })
+        return {
+          player: {
+            id: item.playerId,
+            name: item.playerName,
+            phone: item.phone,
+            monthly: item.expectedAmount,
+          },
+          month: monthName,
+          monthKey: item.monthKey,
+          baseAmount: item.expectedAmount,
+          carryoverAmount: item.carryoverAmount,
+          totalAmount: item.totalAmount,
+          amountPaid: item.amountPaid,
+          balance: item.balance,
+          status: item.status,
+          lastPayment: item.lastPaymentDate || "",
+          paymentCount: item.paymentCount
         }
-      }
+      })
 
       // Sort by status (incomplete first) then by balance (highest first)
       reportData.sort((a, b) => {

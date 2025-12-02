@@ -103,9 +103,9 @@ export function RecentPayments() {
   }
 
   const getUserInitials = (name: string | undefined) => {
+    if (!name) return "??"
     return name
       .split(" ")
-    if (!name) return "??"
       .map((n) => n[0])
       .join("")
       .toUpperCase()

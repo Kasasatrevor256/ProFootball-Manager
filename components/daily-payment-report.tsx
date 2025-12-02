@@ -148,7 +148,7 @@ export function DailyPaymentReport(){
     return allExpenses
   }
 
-  // Generate daily financial report
+  // Generate daily financial report from backend API
   const generateDailyReport = async (date: string) => {
     try {
       setIsLoading(true)
@@ -156,88 +156,26 @@ export function DailyPaymentReport(){
       
       console.log(`📊 Generating daily financial report for ${date}`)
 
-      // Fetch both payments and expenses
-      const [allPayments, allExpenses] = await Promise.all([
-        fetchAllPayments(),
-        fetchAllExpenses()
-      ])
+      // Fetch report data from backend API
+      const response = await fetch(
+        `${API_BASE_URL}/api/reports/daily?date=${date}`,
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+          credentials: "include",
+        }
+      )
 
-      console.log(`✅ Loaded ${allPayments.length} payments and ${allExpenses.length} expenses`)
-
-      // Filter payments for the selected date
-      const dailyPayments = allPayments.filter(payment => {
-        const paymentDate = new Date(payment.date).toISOString().split('T')[0]
-        return paymentDate === date
-      })
-
-      // Filter expenses for the selected date
-      const dailyExpenses = allExpenses.filter(expense => {
-        const expenseDate = new Date(expense.expense_date).toISOString().split('T')[0]
-        return expenseDate === date
-      })
-
-      console.log(`💰 Found ${dailyPayments.length} payments and ${dailyExpenses.length} expenses for ${date}`)
-
-      // Calculate summary statistics
-      const totalPayments = dailyPayments.reduce((sum, payment) => sum + payment.amount, 0)
-      const totalExpenses = dailyExpenses.reduce((sum, expense) => sum + expense.amount, 0)
-      const netAmount = totalPayments - totalExpenses
-      const uniquePlayers = new Set(dailyPayments.map(payment => payment.playerId)).size
-
-      // Group payments by type
-      const paymentsByType = {
-        annual: { count: 0, amount: 0 },
-        monthly: { count: 0, amount: 0 },
-        pitch: { count: 0, amount: 0 },
-        matchday: { count: 0, amount: 0 }
+      if (!response.ok) {
+        const errorText = await response.text()
+        if (response.status === 401) {
+          throw new Error("Authentication failed. Please log in again.")
+        }
+        throw new Error(`Failed to fetch daily report: ${response.status} - ${errorText}`)
       }
 
-      dailyPayments.forEach(payment => {
-        if (payment.paymentType in paymentsByType) {
-          paymentsByType[payment.paymentType as keyof typeof paymentsByType].count++
-          paymentsByType[payment.paymentType as keyof typeof paymentsByType].amount += payment.amount
-        }
-      })
-
-      // Group expenses by category
-      const expensesByCategory: Record<string, { count: number; amount: number }> = {}
-      dailyExpenses.forEach(expense => {
-        if (!expensesByCategory[expense.category]) {
-          expensesByCategory[expense.category] = { count: 0, amount: 0 }
-        }
-        expensesByCategory[expense.category].count++
-        expensesByCategory[expense.category].amount += expense.amount
-      })
-
-      const report: DailyFinancialSummary = {
-        selectedDate: date,
-        payments: dailyPayments.sort((a, b) => {
-          const timeA = new Date(a.created_at).getTime()
-          const timeB = new Date(b.created_at).getTime()
-          if (timeA !== timeB) {
-            return timeB - timeA // Most recent first
-          }
-          return b.amount - a.amount // Highest amount first
-        }),
-        expenses: dailyExpenses.sort((a, b) => {
-          const timeA = new Date(a.created_at).getTime()
-          const timeB = new Date(b.created_at).getTime()
-          if (timeA !== timeB) {
-            return timeB - timeA // Most recent first
-          }
-          return b.amount - a.amount // Highest amount first
-        }),
-        summary: {
-          totalPayments,
-          totalExpenses,
-          netAmount,
-          paymentsCount: dailyPayments.length,
-          expensesCount: dailyExpenses.length,
-          uniquePlayers,
-          paymentsByType,
-          expensesByCategory
-        }
-      }
+      const report: DailyFinancialSummary = await response.json()
+      console.log(`✅ Loaded report with ${report.payments.length} payments and ${report.expenses.length} expenses`)
 
       setReportData(report)
       
@@ -247,7 +185,7 @@ export function DailyPaymentReport(){
       setError(errorMessage)
       
       toast({
-        title: "Error loading daily report",
+        title: "Error generating daily report",
         description: errorMessage,
         variant: "destructive",
       })

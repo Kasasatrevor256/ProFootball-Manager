@@ -56,14 +56,13 @@ export function PaymentsList() {
     return headers
   }
 
-  // Fetch payments from API with caching
+  // Fetch payments from API with caching - fetches all payments
   const fetchPayments = async () => {
     setIsLoading(true)
     setError(null)
 
     try {
-      const limit = itemsPerPage * 5
-      const cacheKey = `payments-${limit}`
+      const cacheKey = `payments-all`
 
       // Check cache first
       const cachedData = getCachedData(cacheKey)
@@ -73,20 +72,33 @@ export function PaymentsList() {
         return
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/payments?limit=${limit}`, {
-        method: "GET",
-        headers: getAuthHeaders(),
-        credentials: "include",
-      })
+      // Fetch all payments in batches
+      const allPayments: Payment[] = []
+      let skip = 0
+      const limit = 100
+      let hasMore = true
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
-        throw new Error(errorData.detail || `Failed to fetch payments: ${response.status}`)
+      while (hasMore) {
+        const response = await fetch(`${API_BASE_URL}/api/payments?skip=${skip}&limit=${limit}`, {
+          method: "GET",
+          headers: getAuthHeaders(),
+          credentials: "include",
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
+          throw new Error(errorData.detail || `Failed to fetch payments: ${response.status}`)
+        }
+
+        const paymentsData = await response.json()
+        allPayments.push(...paymentsData)
+        
+        hasMore = paymentsData.length === limit
+        skip += limit
       }
 
-      const paymentsData = await response.json()
-      setCachedData(cacheKey, paymentsData)
-      setPayments(paymentsData)
+      setCachedData(cacheKey, allPayments)
+      setPayments(allPayments)
     } catch (error) {
       console.error("❌ Error fetching payments:", error)
       const errorMessage = error instanceof Error ? error.message : "Failed to load payments"

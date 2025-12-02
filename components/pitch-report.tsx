@@ -212,163 +212,60 @@ export function PitchReport() {
       setIsLoading(true)
       setError(null)
       
-      console.log("📊 Loading pitch report data with carryover...")
-      
-      // Fetch all payments with pagination
-      console.log("🔄 Fetching all payments...")
-      const allPayments = await fetchAllPayments()
+      console.log("📊 Loading pitch report data from backend...")
 
-      // Fetch players
-      console.log("🔄 Fetching players...")
-      const playersResponse = await fetch(`${API_BASE_URL}/api/players?limit=100`, {
-        method: "GET",
-        headers: getAuthHeaders(),
-        credentials: "include",
-      })
+      // Fetch report data from backend API
+      const [year, month] = selectedMonth === "all" 
+        ? [new Date().getFullYear(), "all"]
+        : selectedMonth.split('-').map(Number)
 
-      if (!playersResponse.ok) {
-        const errorText = await playersResponse.text()
-        console.error("❌ Players fetch failed:", playersResponse.status, errorText)
-        if (playersResponse.status === 401) {
+      const response = await fetch(
+        `${API_BASE_URL}/api/reports/pitch?year=${year}&month=${month}`,
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+          credentials: "include",
+        }
+      )
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        if (response.status === 401) {
           throw new Error("Authentication failed. Please log in again.")
         }
-        throw new Error(`Failed to fetch players: ${playersResponse.status} - ${errorText}`)
+        throw new Error(`Failed to fetch pitch report: ${response.status} - ${errorText}`)
       }
 
-      const playersData: Player[] = await playersResponse.json()
-      
-      console.log(`✅ Loaded ${allPayments.length} total payments`)
-      console.log(`✅ Loaded ${playersData.length} players`)
-      
-      setAllPayments(allPayments)
-      setPlayers(playersData)
+      const apiData = await response.json()
+      console.log(`✅ Loaded report data for ${apiData.data.length} entries`)
 
-      // Filter pitch payments from July 2025 onwards
-      const pitchPayments = allPayments.filter(payment => {
-        const paymentDate = new Date(payment.date)
-        const isPitch = payment.paymentType === "pitch"
-        const isFromJuly2025 = paymentDate >= new Date(2025, 6, 1) // July 1, 2025
-        return isPitch && isFromJuly2025
-      })
-      console.log(`💳 Found ${pitchPayments.length} pitch payments from July 2025 onwards`)
-
-      // Generate report data
-      const reportData: PitchReportData[] = []
-
-      if (selectedMonth === "all") {
-        // Show all months from July 2025 onwards
-        const monthsWithData = new Set<string>()
-
-        // Add months from July 2025 to current month
-        const currentDate = new Date()
-        for (let year = 2025; year <= currentDate.getFullYear(); year++) {
-          const startMonth = year === 2025 ? 7 : 1 // July for 2025, January for other years
-          const endMonth = year === currentDate.getFullYear() ? currentDate.getMonth() + 1 : 12
-          
-          for (let month = startMonth; month <= endMonth; month++) {
-            const monthKey = `${year}-${String(month).padStart(2, '0')}`
-            monthsWithData.add(monthKey)
-          }
-        }
-
-        // For each player and each month, create a report entry
-        for (const player of playersData) {
-          for (const monthKey of Array.from(monthsWithData).sort()) {
-            const [year, month] = monthKey.split('-').map(Number)
-            const monthStart = new Date(year, month - 1, 1)
-            const monthEnd = new Date(year, month, 0, 23, 59, 59)
-            
-            const playerPitchPayments = pitchPayments.filter(payment => {
-              const paymentDate = new Date(payment.date)
-              return payment.playerId === player.id && 
-                     paymentDate >= monthStart && 
-                     paymentDate <= monthEnd
-            })
-
-            // Calculate carryover for this month
-            const carryoverAmount = await calculatePitchCarryover(player.id, monthKey, allPayments)
-            
-            const baseAmount = player.pitch
-            const totalAmount = baseAmount + carryoverAmount
-            const amountPaid = playerPitchPayments.reduce((sum, payment) => sum + payment.amount, 0)
-            const balance = Math.max(0, totalAmount - amountPaid)
-            const status: "Complete" | "Incomplete" = balance <= 0 ? "Complete" : "Incomplete"
-            
-            const lastPaymentDate = playerPitchPayments.length > 0 
-              ? playerPitchPayments
-                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
-                  .date
-              : null
-
-            const monthName = new Date(year, month - 1, 1)
-              .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-
-            reportData.push({
-              player,
-              month: monthName,
-              monthKey,
-              baseAmount,
-              carryoverAmount,
-              totalAmount,
-              amountPaid,
-              balance,
-              paymentCount: playerPitchPayments.length,
-              lastPaymentDate,
-              status
-            })
-          }
-        }
-      } else {
-        // Filter for specific month
-        const [year, month] = selectedMonth.split('-').map(Number)
-        const monthStart = new Date(year, month - 1, 1)
-        const monthEnd = new Date(year, month, 0, 23, 59, 59)
-        
-        console.log(`🗓️ Filtering for month: ${monthStart.toISOString()} to ${monthEnd.toISOString()}`)
-
-        const selectedMonthPayments = pitchPayments.filter(payment => {
-          const paymentDate = new Date(payment.date)
-          return paymentDate >= monthStart && paymentDate <= monthEnd
-        })
-
-        console.log(`📅 Found ${selectedMonthPayments.length} payments for selected month`)
-
-        const monthName = new Date(year, month - 1, 1)
+      // Transform backend data to match frontend format
+      const reportData: PitchReportData[] = apiData.data.map((item: any) => {
+        const [yearStr, monthStr] = item.monthKey.split('-')
+        const yearNum = parseInt(yearStr)
+        const monthNum = parseInt(monthStr)
+        const monthName = new Date(yearNum, monthNum - 1, 1)
           .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
-        for (const player of playersData) {
-          const playerPitchPayments = selectedMonthPayments.filter(p => p.playerId === player.id)
-          
-          // Calculate carryover for this month
-          const carryoverAmount = await calculatePitchCarryover(player.id, selectedMonth, allPayments)
-          
-          const baseAmount = player.pitch
-          const totalAmount = baseAmount + carryoverAmount
-          const amountPaid = playerPitchPayments.reduce((sum, payment) => sum + payment.amount, 0)
-          const balance = Math.max(0, totalAmount - amountPaid)
-          const status: "Complete" | "Incomplete" = balance <= 0 ? "Complete" : "Incomplete"
-          
-          const lastPaymentDate = playerPitchPayments.length > 0 
-            ? playerPitchPayments
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
-                .date
-            : null
-
-          reportData.push({
-            player,
-            month: monthName,
-            monthKey: selectedMonth,
-            baseAmount,
-            carryoverAmount,
-            totalAmount,
-            amountPaid,
-            balance,
-            paymentCount: playerPitchPayments.length,
-            lastPaymentDate,
-            status
-          })
+        return {
+          player: {
+            id: item.playerId,
+            name: item.playerName,
+            phone: item.phone,
+            pitch: item.expectedAmount,
+          },
+          month: monthName,
+          monthKey: item.monthKey,
+          baseAmount: item.expectedAmount,
+          carryoverAmount: item.carryoverAmount,
+          totalAmount: item.totalAmount,
+          amountPaid: item.amountPaid,
+          balance: item.balance,
+          paymentCount: item.paymentCount,
+          lastPaymentDate: item.lastPaymentDate,
+          status: item.status
         }
-      }
+      })
 
       // Sort by status (incomplete first) then by balance (highest first)
       reportData.sort((a, b) => {

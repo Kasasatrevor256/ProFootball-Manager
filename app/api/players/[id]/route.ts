@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { UpdatePlayerRequest } from '@/lib/types';
 
@@ -14,13 +14,27 @@ export async function GET(
     }
 
     const { id } = await params;
-    const playerDoc = await adminDb.collection('players').doc(id).get();
+    const { data: player, error } = await supabaseAdmin
+      .from('players')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    if (!playerDoc.exists) {
+    if (error || !player) {
       return errorResponse('Player not found', 404);
     }
 
-    return successResponse({ id: playerDoc.id, ...playerDoc.data() });
+    return successResponse({
+      id: player.id,
+      name: player.name,
+      phone: player.phone,
+      annual: parseFloat(player.annual.toString()),
+      monthly: parseFloat(player.monthly.toString()),
+      pitch: parseFloat(player.pitch.toString()),
+      matchDay: player.match_day,
+      createdAt: player.created_at,
+      updatedAt: player.updated_at,
+    });
   } catch (error) {
     console.error('Get player error:', error);
     return errorResponse('Internal server error', 500);
@@ -40,20 +54,47 @@ export async function PUT(
     const { id } = await params;
     const body: UpdatePlayerRequest = await request.json();
 
-    const playerDoc = await adminDb.collection('players').doc(id).get();
-    if (!playerDoc.exists) {
+    const { data: existingPlayer } = await supabaseAdmin
+      .from('players')
+      .select('id')
+      .eq('id', id)
+      .single();
+
+    if (!existingPlayer) {
       return errorResponse('Player not found', 404);
     }
 
-    const updateData = {
-      ...body,
-      updatedAt: new Date().toISOString(),
-    };
+    const updateData: any = {};
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.phone !== undefined) updateData.phone = body.phone;
+    if (body.annual !== undefined) updateData.annual = body.annual;
+    if (body.monthly !== undefined) updateData.monthly = body.monthly;
+    if (body.pitch !== undefined) updateData.pitch = body.pitch;
+    if (body.matchDay !== undefined) updateData.match_day = body.matchDay;
 
-    await adminDb.collection('players').doc(id).update(updateData);
+    const { data: updatedPlayer, error } = await supabaseAdmin
+      .from('players')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
 
-    const updatedDoc = await adminDb.collection('players').doc(id).get();
-    return successResponse({ id, ...updatedDoc.data() });
+    if (error) {
+      console.error('Update player error:', error);
+      return errorResponse('Failed to update player', 500);
+    }
+
+    return successResponse({
+      id: updatedPlayer.id,
+      name: updatedPlayer.name,
+      phone: updatedPlayer.phone,
+      annual: parseFloat(updatedPlayer.annual.toString()),
+      monthly: parseFloat(updatedPlayer.monthly.toString()),
+      pitch: parseFloat(updatedPlayer.pitch.toString()),
+      matchDay: updatedPlayer.match_day,
+      createdAt: updatedPlayer.created_at,
+      updatedAt: updatedPlayer.updated_at,
+    });
   } catch (error) {
     console.error('Update player error:', error);
     return errorResponse('Internal server error', 500);
@@ -71,12 +112,15 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const playerDoc = await adminDb.collection('players').doc(id).get();
-    if (!playerDoc.exists) {
-      return errorResponse('Player not found', 404);
-    }
+    const { error } = await supabaseAdmin
+      .from('players')
+      .delete()
+      .eq('id', id);
 
-    await adminDb.collection('players').doc(id).delete();
+    if (error) {
+      console.error('Delete player error:', error);
+      return errorResponse('Failed to delete player', 500);
+    }
 
     return new Response(null, { status: 204 });
   } catch (error) {

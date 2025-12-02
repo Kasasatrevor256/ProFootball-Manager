@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 export async function GET(request: NextRequest) {
@@ -9,18 +9,24 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    const userDoc = await adminDb.collection('users').doc(authUser.uid).get();
+    const { data: user, error } = await supabaseAdmin
+      .from('users')
+      .select('id, name, email, role, status, created_at, updated_at')
+      .eq('id', authUser.uid)
+      .single();
 
-    if (!userDoc.exists) {
+    if (error || !user) {
       return errorResponse('User not found', 404);
     }
 
-    const userData = userDoc.data();
-    const { passwordHash, ...userWithoutPassword } = userData!;
-
     return successResponse({
-      id: userDoc.id,
-      ...userWithoutPassword,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
     });
   } catch (error) {
     console.error('Get current user error:', error);

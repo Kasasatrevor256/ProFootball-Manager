@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, forbiddenResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreateUserRequest, UserRole, UserStatus } from '@/lib/types';
 import bcrypt from 'bcrypt';
@@ -12,9 +12,14 @@ export async function POST(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    // Get user role from Firestore
-    const userDoc = await adminDb.collection('users').doc(authUser.uid).get();
-    if (!userDoc.exists || userDoc.data()?.role !== UserRole.ADMIN) {
+    // Get user role from Supabase
+    const { data: currentUser } = await supabaseAdmin
+      .from('users')
+      .select('role')
+      .eq('id', authUser.uid)
+      .single();
+
+    if (!currentUser || currentUser.role !== UserRole.ADMIN) {
       return forbiddenResponse('Admin access required');
     }
 
@@ -26,37 +31,47 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user already exists
-    const existingUser = await adminDb.collection('users').where('email', '==', email).limit(1).get();
-    if (!existingUser.empty) {
+    const { data: existingUser } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .limit(1)
+      .single();
+
+    if (existingUser) {
       return errorResponse('User with this email already exists', 400);
     }
 
     // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Create user in Firestore
-    const userRef = adminDb.collection('users').doc();
-    const now = new Date().toISOString();
+    // Create user in Supabase
+    const { data: newUser, error } = await supabaseAdmin
+      .from('users')
+      .insert({
+        name,
+        email,
+        role,
+        status: UserStatus.ACTIVE,
+        password_hash: passwordHash,
+      })
+      .select('id, name, email, role, status, created_at, updated_at')
+      .single();
 
-    const newUser = {
-      name,
-      email,
-      role,
-      status: UserStatus.ACTIVE,
-      passwordHash,
-      createdAt: now,
-      updatedAt: now,
-    };
+    if (error) {
+      console.error('Create user error:', error);
+      return errorResponse('Failed to create user', 500);
+    }
 
-    await userRef.set(newUser);
-
-    // Return user without password hash
-    const { passwordHash: _, ...userWithoutPassword } = newUser;
-
-    return successResponse(
-      { id: userRef.id, ...userWithoutPassword },
-      201
-    );
+    return successResponse({
+      id: newUser.id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      status: newUser.status,
+      createdAt: newUser.created_at,
+      updatedAt: newUser.updated_at,
+    }, 201);
   } catch (error) {
     console.error('Register error:', error);
     return errorResponse('Internal server error', 500);

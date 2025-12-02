@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreateExpenseRequest } from '@/lib/types';
 
@@ -17,23 +17,35 @@ export async function POST(request: NextRequest) {
       return errorResponse('Description, category, and amount are required', 400);
     }
 
-    const expenseRef = adminDb.collection('expenses').doc();
-    const now = new Date().toISOString();
+    const { data: expense, error } = await supabaseAdmin
+      .from('expenses')
+      .insert({
+        description,
+        category,
+        amount,
+        expense_date: expenseDate || new Date().toISOString().split('T')[0],
+        match_day_id: matchDayId || null,
+        created_by: authUser.uid,
+      })
+      .select()
+      .single();
 
-    const newExpense = {
-      description,
-      category,
-      amount,
-      expenseDate: expenseDate || new Date().toISOString().split('T')[0],
-      matchDayId: matchDayId || null,
-      createdBy: authUser.uid,
-      createdAt: now,
-      updatedAt: now,
-    };
+    if (error) {
+      console.error('Create expense error:', error);
+      return errorResponse('Failed to create expense', 500);
+    }
 
-    await expenseRef.set(newExpense);
-
-    return successResponse({ id: expenseRef.id, ...newExpense }, 201);
+    return successResponse({
+      id: expense.id,
+      description: expense.description,
+      category: expense.category,
+      amount: parseFloat(expense.amount.toString()),
+      expenseDate: expense.expense_date,
+      matchDayId: expense.match_day_id,
+      createdBy: expense.created_by,
+      createdAt: expense.created_at,
+      updatedAt: expense.updated_at,
+    }, 201);
   } catch (error) {
     console.error('Create expense error:', error);
     return errorResponse('Internal server error', 500);
@@ -55,28 +67,46 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('start_date');
     const endDate = searchParams.get('end_date');
 
-    let query: any = adminDb.collection('expenses');
+    let query = supabaseAdmin
+      .from('expenses')
+      .select('*')
+      .order('expense_date', { ascending: false })
+      .range(skip, skip + limit - 1);
 
     // Apply filters
     if (category) {
-      query = query.where('category', '==', category);
+      query = query.eq('category', category);
     }
     if (matchDayId) {
-      query = query.where('matchDayId', '==', matchDayId);
+      query = query.eq('match_day_id', matchDayId);
     }
     if (startDate) {
-      query = query.where('expenseDate', '>=', startDate);
+      query = query.gte('expense_date', startDate);
     }
     if (endDate) {
-      query = query.where('expenseDate', '<=', endDate);
+      query = query.lte('expense_date', endDate);
     }
 
-    query = query.orderBy('expenseDate', 'desc').limit(limit).offset(skip);
+    const { data: expenses, error } = await query;
 
-    const snapshot = await query.get();
-    const expenses = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+    if (error) {
+      console.error('Get expenses error:', error);
+      return errorResponse('Failed to fetch expenses', 500);
+    }
 
-    return successResponse(expenses);
+    const mappedExpenses = (expenses || []).map((expense: any) => ({
+      id: expense.id,
+      description: expense.description,
+      category: expense.category,
+      amount: parseFloat(expense.amount.toString()),
+      expenseDate: expense.expense_date,
+      matchDayId: expense.match_day_id,
+      createdBy: expense.created_by,
+      createdAt: expense.created_at,
+      updatedAt: expense.updated_at,
+    }));
+
+    return successResponse(mappedExpenses);
   } catch (error) {
     console.error('Get expenses error:', error);
     return errorResponse('Internal server error', 500);

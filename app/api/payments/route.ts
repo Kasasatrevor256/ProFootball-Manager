@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreatePaymentRequest } from '@/lib/types';
 
@@ -17,23 +17,38 @@ export async function POST(request: NextRequest) {
       return errorResponse('All required fields must be provided', 400);
     }
 
-    const paymentRef = adminDb.collection('payments').doc();
-    const now = new Date().toISOString();
+    const { data: payment, error } = await supabaseAdmin
+      .from('payments')
+      .insert({
+        player_id: playerId,
+        player_name: playerName,
+        payment_type: paymentType,
+        amount: amount,
+        date: date || new Date().toISOString().split('T')[0],
+        created_by: authUser.uid,
+      })
+      .select()
+      .single();
 
-    const newPayment = {
-      playerId,
-      playerName,
-      paymentType,
-      amount,
-      date: date || new Date().toISOString().split('T')[0],
-      createdBy: authUser.uid,
-      createdAt: now,
-      updatedAt: now,
+    if (error) {
+      console.error('Create payment error:', error);
+      return errorResponse('Failed to create payment', 500);
+    }
+
+    // Map snake_case to camelCase for response
+    const response = {
+      id: payment.id,
+      playerId: payment.player_id,
+      playerName: payment.player_name,
+      paymentType: payment.payment_type,
+      amount: parseFloat(payment.amount.toString()),
+      date: payment.date,
+      createdBy: payment.created_by,
+      createdAt: payment.created_at,
+      updatedAt: payment.updated_at,
     };
 
-    await paymentRef.set(newPayment);
-
-    return successResponse({ id: paymentRef.id, ...newPayment }, 201);
+    return successResponse(response, 201);
   } catch (error) {
     console.error('Create payment error:', error);
     return errorResponse('Internal server error', 500);
@@ -55,28 +70,47 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('start_date');
     const endDate = searchParams.get('end_date');
 
-    let query: any = adminDb.collection('payments');
+    let query = supabaseAdmin
+      .from('payments')
+      .select('*')
+      .order('date', { ascending: false })
+      .range(skip, skip + limit - 1);
 
     // Apply filters
     if (playerId) {
-      query = query.where('playerId', '==', playerId);
+      query = query.eq('player_id', playerId);
     }
     if (paymentType) {
-      query = query.where('paymentType', '==', paymentType);
+      query = query.eq('payment_type', paymentType);
     }
     if (startDate) {
-      query = query.where('date', '>=', startDate);
+      query = query.gte('date', startDate);
     }
     if (endDate) {
-      query = query.where('date', '<=', endDate);
+      query = query.lte('date', endDate);
     }
 
-    query = query.orderBy('date', 'desc').limit(limit).offset(skip);
+    const { data: payments, error } = await query;
 
-    const snapshot = await query.get();
-    const payments = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+    if (error) {
+      console.error('Get payments error:', error);
+      return errorResponse('Failed to fetch payments', 500);
+    }
 
-    return successResponse(payments);
+    // Map snake_case to camelCase for frontend
+    const mappedPayments = (payments || []).map((payment: any) => ({
+      id: payment.id,
+      playerId: payment.player_id,
+      playerName: payment.player_name,
+      paymentType: payment.payment_type,
+      amount: parseFloat(payment.amount.toString()),
+      date: payment.date,
+      createdBy: payment.created_by,
+      createdAt: payment.created_at,
+      updatedAt: payment.updated_at,
+    }));
+
+    return successResponse(mappedPayments);
   } catch (error) {
     console.error('Get payments error:', error);
     return errorResponse('Internal server error', 500);

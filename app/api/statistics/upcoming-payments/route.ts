@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface PlayerPaymentStatus {
@@ -36,13 +36,33 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10');
 
     // Fetch players and payments in parallel
-    const [playersSnapshot, paymentsSnapshot] = await Promise.all([
-      adminDb.collection('players').get(),
-      adminDb.collection('payments').orderBy('date', 'desc').get()
+    const [playersResult, paymentsResult] = await Promise.all([
+      supabaseAdmin.from('players').select('*'),
+      supabaseAdmin.from('payments').select('*').order('date', { ascending: false })
     ]);
 
-    const players = playersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const payments = paymentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (playersResult.error || paymentsResult.error) {
+      console.error('Error fetching data:', playersResult.error || paymentsResult.error);
+      return errorResponse('Failed to fetch data', 500);
+    }
+
+    const players = (playersResult.data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      phone: p.phone,
+      annual: parseFloat(p.annual.toString()),
+      monthly: parseFloat(p.monthly.toString()),
+      pitch: parseFloat(p.pitch.toString()),
+    }));
+
+    const payments = (paymentsResult.data || []).map((p: any) => ({
+      id: p.id,
+      playerId: p.player_id,
+      playerName: p.player_name,
+      paymentType: p.payment_type,
+      amount: parseFloat(p.amount.toString()),
+      date: p.date,
+    }));
 
     const now = new Date();
     const currentYear = now.getFullYear();

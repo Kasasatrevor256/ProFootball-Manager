@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface PlayerMonthlyData {
@@ -9,9 +9,12 @@ interface PlayerMonthlyData {
   expectedAmount: number;
   amountPaid: number;
   balance: number;
+  carryoverAmount: number;
+  totalAmount: number;
   lastPaymentDate: string | null;
   paymentCount: number;
-  status: 'Paid' | 'Partial' | 'Unpaid';
+  status: 'Complete' | 'Incomplete';
+  monthKey: string;
 }
 
 export async function GET(request: NextRequest) {
@@ -22,87 +25,143 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const month = parseInt(searchParams.get('month') || (new Date().getMonth() + 1).toString());
+    const month = searchParams.get('month') || 'all';
     const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString());
-    const limit = parseInt(searchParams.get('limit') || '0');
-    const offset = parseInt(searchParams.get('offset') || '0');
 
-    // Fetch all players and payments
-    const [playersSnapshot, paymentsSnapshot] = await Promise.all([
-      adminDb.collection('players').get(),
-      adminDb.collection('payments').where('paymentType', '==', 'monthly').get()
+    // Fetch all players and payments in parallel
+    const [playersResult, paymentsResult] = await Promise.all([
+      supabaseAdmin.from('players').select('*'),
+      supabaseAdmin.from('payments').select('*').order('date', { ascending: false })
     ]);
 
-    const players = playersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const allPayments = paymentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-    const reportData: PlayerMonthlyData[] = [];
-
-    for (const player of players) {
-      // Filter payments for this player in the specified month/year
-      const monthPayments = allPayments.filter((p: any) => {
-        const paymentDate = new Date(p.date);
-        return p.playerId === player.id &&
-               paymentDate.getMonth() + 1 === month &&
-               paymentDate.getFullYear() === year;
-      });
-
-      const expectedAmount = player.monthly || 10000;
-      const amountPaid = monthPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-      const balance = expectedAmount - amountPaid;
-
-      const sortedPayments = monthPayments.sort((a: any, b: any) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-      const lastPaymentDate = sortedPayments.length > 0 ? sortedPayments[0].date : null;
-
-      let status: 'Paid' | 'Partial' | 'Unpaid';
-      if (amountPaid >= expectedAmount) {
-        status = 'Paid';
-      } else if (amountPaid > 0) {
-        status = 'Partial';
-      } else {
-        status = 'Unpaid';
-      }
-
-      reportData.push({
-        playerId: player.id,
-        playerName: player.name,
-        phone: player.phone,
-        expectedAmount,
-        amountPaid,
-        balance,
-        lastPaymentDate,
-        paymentCount: monthPayments.length,
-        status
-      });
+    if (playersResult.error || paymentsResult.error) {
+      console.error('Error fetching data:', playersResult.error || paymentsResult.error);
+      return errorResponse('Failed to fetch data', 500);
     }
 
-    // Sort by balance (highest first)
-    reportData.sort((a, b) => b.balance - a.balance);
+    const players = (playersResult.data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      phone: p.phone,
+      monthly: parseFloat(p.monthly.toString()),
+      annual: parseFloat(p.annual.toString()),
+    }));
+
+    const allPayments = (paymentsResult.data || []).map((p: any) => ({
+      id: p.id,
+      playerId: p.player_id,
+      playerName: p.player_name,
+      paymentType: p.payment_type,
+      amount: parseFloat(p.amount.toString()),
+      date: p.date,
+    }));
+
+    const reportData: PlayerMonthlyData[] = [];
+    const fiscalStartMonth = 7; // July
+    const currentDate = new Date();
+
+    // Determine months to process
+    let monthsToProcess: string[] = [];
+    
+    if (month === 'all') {
+      // Generate all months from July 2025 to current
+      for (let y = 2025; y <= currentDate.getFullYear(); y++) {
+        const startMonth = y === 2025 ? 7 : 1;
+        const endMonth = y === currentDate.getFullYear() ? currentDate.getMonth() + 1 : 12;
+        for (let m = startMonth; m <= endMonth; m++) {
+          monthsToProcess.push(`${y}-${String(m).padStart(2, '0')}`);
+        }
+      }
+    } else {
+      monthsToProcess.push(`${year}-${String(parseInt(month)).padStart(2, '0')}`);
+    }
+
+    // Process each player and month combination
+    for (const player of players) {
+      for (const monthKey of monthsToProcess) {
+        const [yearStr, monthStr] = monthKey.split('-');
+        const yearNum = parseInt(yearStr);
+        const monthNum = parseInt(monthStr);
+        
+        const monthStart = new Date(yearNum, monthNum - 1, 1);
+        const monthEnd = new Date(yearNum, monthNum, 0, 23, 59, 59);
+
+        // Get monthly payments for this player and month
+        const monthlyPayments = allPayments.filter(p => {
+          const paymentDate = new Date(p.date);
+          return p.playerId === player.id &&
+                 p.paymentType === 'monthly' &&
+                 paymentDate >= monthStart &&
+                 paymentDate <= monthEnd;
+        });
+
+        // Calculate carryover from previous months
+        let carryoverAmount = 0;
+        if (monthNum > fiscalStartMonth || yearNum > 2025) {
+          // Calculate carryover from fiscal year start to this month
+          const fiscalYearStart = new Date(yearNum >= 2026 ? yearNum - 1 : 2025, fiscalStartMonth - 1, 1);
+          const monthsSinceFiscalStart = Math.floor((monthStart.getTime() - fiscalYearStart.getTime()) / (30.44 * 24 * 60 * 60 * 1000));
+          
+          // Get all monthly payments from fiscal start to this month
+          const fiscalPayments = allPayments.filter(p => {
+            const paymentDate = new Date(p.date);
+            return p.playerId === player.id &&
+                   p.paymentType === 'monthly' &&
+                   paymentDate >= fiscalYearStart &&
+                   paymentDate < monthStart;
+          });
+
+          const expectedPayments = monthsSinceFiscalStart;
+          const paidAmount = fiscalPayments.reduce((sum, p) => sum + p.amount, 0);
+          const expectedAmount = expectedPayments * player.monthly;
+          carryoverAmount = Math.max(0, expectedAmount - paidAmount);
+        }
+
+        const baseAmount = player.monthly;
+        const totalAmount = baseAmount + carryoverAmount;
+        const amountPaid = monthlyPayments.reduce((sum, p) => sum + p.amount, 0);
+        const balance = Math.max(0, totalAmount - amountPaid);
+        const status: 'Complete' | 'Incomplete' = balance <= 0 ? 'Complete' : 'Incomplete';
+
+        const sortedPayments = monthlyPayments.sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        const lastPaymentDate = sortedPayments.length > 0 ? sortedPayments[0].date : null;
+
+        reportData.push({
+          playerId: player.id,
+          playerName: player.name,
+          phone: player.phone,
+          expectedAmount: baseAmount,
+          amountPaid,
+          balance,
+          carryoverAmount,
+          totalAmount,
+          lastPaymentDate,
+          paymentCount: monthlyPayments.length,
+          status,
+          monthKey,
+        });
+      }
+    }
 
     // Calculate summary
     const summary = {
-      month,
+      month: month === 'all' ? 'all' : parseInt(month),
       year,
-      totalPlayers: reportData.length,
-      totalExpected: reportData.reduce((sum, p) => sum + p.expectedAmount, 0),
+      totalPlayers: new Set(reportData.map(r => r.playerId)).size,
+      totalExpected: reportData.reduce((sum, p) => sum + p.totalAmount, 0),
       totalPaid: reportData.reduce((sum, p) => sum + p.amountPaid, 0),
       totalBalance: reportData.reduce((sum, p) => sum + p.balance, 0),
-      paidCount: reportData.filter(p => p.status === 'Paid').length,
-      partialCount: reportData.filter(p => p.status === 'Partial').length,
-      unpaidCount: reportData.filter(p => p.status === 'Unpaid').length,
+      totalCarryover: reportData.reduce((sum, p) => sum + p.carryoverAmount, 0),
+      completeCount: reportData.filter(p => p.status === 'Complete').length,
+      incompleteCount: reportData.filter(p => p.status === 'Incomplete').length,
     };
-
-    const paginatedData = limit > 0
-      ? reportData.slice(offset, offset + limit)
-      : reportData;
 
     return successResponse({
       summary,
-      data: paginatedData,
+      data: reportData,
       totalRecords: reportData.length,
-      hasMore: limit > 0 && (offset + limit) < reportData.length
     });
   } catch (error) {
     console.error('Monthly report error:', error);

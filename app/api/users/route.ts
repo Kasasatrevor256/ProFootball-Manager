@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 export async function GET(request: NextRequest) {
@@ -14,37 +14,39 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '100');
     const search = searchParams.get('search');
 
-    let query = adminDb.collection('users').orderBy('createdAt', 'desc');
+    let query = supabaseAdmin
+      .from('users')
+      .select('id, name, email, role, status, created_at, updated_at')
+      .order('created_at', { ascending: false })
+      .range(skip, skip + limit - 1);
+
+    const { data: users, error } = await query;
+
+    if (error) {
+      console.error('Get users error:', error);
+      return errorResponse('Failed to fetch users', 500);
+    }
+
+    let filteredUsers = (users || []).map((user: any) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
+    }));
 
     // Apply search filter if provided
     if (search) {
-      // Note: Firestore doesn't support full-text search natively
-      // This is a simple case-insensitive search on name and email
-      const usersSnapshot = await query.get();
-      const filteredUsers = usersSnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .filter(user => {
-          const searchLower = search.toLowerCase();
-          return (
-            user.name.toLowerCase().includes(searchLower) ||
-            user.email.toLowerCase().includes(searchLower)
-          );
-        })
-        .slice(skip, skip + limit)
-        .map(({ passwordHash, ...user }) => user);
-
-      return successResponse(filteredUsers);
+      const searchLower = search.toLowerCase();
+      filteredUsers = filteredUsers.filter(user => 
+        user.name.toLowerCase().includes(searchLower) ||
+        user.email.toLowerCase().includes(searchLower)
+      );
     }
 
-    // Without search, use pagination
-    const snapshot = await query.limit(limit).offset(skip).get();
-
-    const users = snapshot.docs.map(doc => {
-      const { passwordHash, ...userData } = doc.data();
-      return { id: doc.id, ...userData };
-    });
-
-    return successResponse(users);
+    return successResponse(filteredUsers);
   } catch (error) {
     console.error('Get users error:', error);
     return errorResponse('Internal server error', 500);

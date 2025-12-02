@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface PlayerPitchData {
@@ -9,9 +9,12 @@ interface PlayerPitchData {
   expectedAmount: number;
   amountPaid: number;
   balance: number;
+  carryoverAmount: number;
+  totalAmount: number;
   paymentCount: number;
-  paymentDates: string[];
-  status: 'Complete' | 'Partial' | 'Unpaid';
+  lastPaymentDate: string | null;
+  status: 'Complete' | 'Incomplete';
+  monthKey: string;
 }
 
 export async function GET(request: NextRequest) {
@@ -22,86 +25,141 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const startDate = searchParams.get('start_date');
-    const endDate = searchParams.get('end_date');
-    const limit = parseInt(searchParams.get('limit') || '0');
-    const offset = parseInt(searchParams.get('offset') || '0');
+    const month = searchParams.get('month') || 'all';
+    const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString());
 
-    // Fetch players and pitch payments
-    const [playersSnapshot, paymentsSnapshot] = await Promise.all([
-      adminDb.collection('players').get(),
-      adminDb.collection('payments').where('paymentType', '==', 'pitch').get()
+    // Fetch all players and pitch payments in parallel
+    const [playersResult, paymentsResult] = await Promise.all([
+      supabaseAdmin.from('players').select('*'),
+      supabaseAdmin.from('payments')
+        .select('*')
+        .eq('payment_type', 'pitch')
+        .order('date', { ascending: false })
     ]);
 
-    const players = playersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const allPayments = paymentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-    // Filter by date range if provided
-    const filteredPayments = allPayments.filter((p: any) => {
-      if (!startDate && !endDate) return true;
-      const paymentDate = new Date(p.date);
-      if (startDate && paymentDate < new Date(startDate)) return false;
-      if (endDate && paymentDate > new Date(endDate)) return false;
-      return true;
-    });
-
-    const reportData: PlayerPitchData[] = [];
-
-    for (const player of players) {
-      const playerPayments = filteredPayments.filter((p: any) => p.playerId === player.id);
-
-      const expectedAmount = player.pitch || 5000;
-      const amountPaid = playerPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-      const balance = expectedAmount - amountPaid;
-
-      const paymentDates = playerPayments.map((p: any) => p.date).sort();
-
-      let status: 'Complete' | 'Partial' | 'Unpaid';
-      if (amountPaid >= expectedAmount) {
-        status = 'Complete';
-      } else if (amountPaid > 0) {
-        status = 'Partial';
-      } else {
-        status = 'Unpaid';
-      }
-
-      reportData.push({
-        playerId: player.id,
-        playerName: player.name,
-        phone: player.phone,
-        expectedAmount,
-        amountPaid,
-        balance,
-        paymentCount: playerPayments.length,
-        paymentDates,
-        status
-      });
+    if (playersResult.error || paymentsResult.error) {
+      console.error('Error fetching data:', playersResult.error || paymentsResult.error);
+      return errorResponse('Failed to fetch data', 500);
     }
 
-    // Sort by balance
-    reportData.sort((a, b) => b.balance - a.balance);
+    const players = (playersResult.data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      phone: p.phone,
+      pitch: parseFloat(p.pitch.toString()),
+    }));
 
+    const allPayments = (paymentsResult.data || []).map((p: any) => ({
+      id: p.id,
+      playerId: p.player_id,
+      playerName: p.player_name,
+      amount: parseFloat(p.amount.toString()),
+      date: p.date,
+    }));
+
+    const reportData: PlayerPitchData[] = [];
+    const fiscalStartMonth = 7; // July
+    const currentDate = new Date();
+
+    // Determine months to process
+    let monthsToProcess: string[] = [];
+    
+    if (month === 'all') {
+      // Generate all months from July 2025 to current
+      for (let y = 2025; y <= currentDate.getFullYear(); y++) {
+        const startMonth = y === 2025 ? 7 : 1;
+        const endMonth = y === currentDate.getFullYear() ? currentDate.getMonth() + 1 : 12;
+        for (let m = startMonth; m <= endMonth; m++) {
+          monthsToProcess.push(`${y}-${String(m).padStart(2, '0')}`);
+        }
+      }
+    } else {
+      monthsToProcess.push(`${year}-${String(parseInt(month)).padStart(2, '0')}`);
+    }
+
+    // Process each player and month combination
+    for (const player of players) {
+      for (const monthKey of monthsToProcess) {
+        const [yearStr, monthStr] = monthKey.split('-');
+        const yearNum = parseInt(yearStr);
+        const monthNum = parseInt(monthStr);
+        
+        const monthStart = new Date(yearNum, monthNum - 1, 1);
+        const monthEnd = new Date(yearNum, monthNum, 0, 23, 59, 59);
+
+        // Get pitch payments for this player and month
+        const pitchPayments = allPayments.filter(p => {
+          const paymentDate = new Date(p.date);
+          return p.playerId === player.id &&
+                 paymentDate >= monthStart &&
+                 paymentDate <= monthEnd;
+        });
+
+        // Calculate carryover from previous months
+        let carryoverAmount = 0;
+        if (monthNum > fiscalStartMonth || yearNum > 2025) {
+          // Calculate carryover from fiscal year start to this month
+          const fiscalYearStart = new Date(yearNum >= 2026 ? yearNum - 1 : 2025, fiscalStartMonth - 1, 1);
+          
+          // Get all pitch payments from fiscal start to this month
+          const fiscalPayments = allPayments.filter(p => {
+            const paymentDate = new Date(p.date);
+            return p.playerId === player.id &&
+                   paymentDate >= fiscalYearStart &&
+                   paymentDate < monthStart;
+          });
+
+          const monthsSinceFiscalStart = Math.floor((monthStart.getTime() - fiscalYearStart.getTime()) / (30.44 * 24 * 60 * 60 * 1000));
+          const expectedAmount = monthsSinceFiscalStart * player.pitch;
+          const paidAmount = fiscalPayments.reduce((sum, p) => sum + p.amount, 0);
+          carryoverAmount = Math.max(0, expectedAmount - paidAmount);
+        }
+
+        const baseAmount = player.pitch;
+        const totalAmount = baseAmount + carryoverAmount;
+        const amountPaid = pitchPayments.reduce((sum, p) => sum + p.amount, 0);
+        const balance = Math.max(0, totalAmount - amountPaid);
+        const status: 'Complete' | 'Incomplete' = balance <= 0 ? 'Complete' : 'Incomplete';
+
+        const sortedPayments = pitchPayments.sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        const lastPaymentDate = sortedPayments.length > 0 ? sortedPayments[0].date : null;
+
+        reportData.push({
+          playerId: player.id,
+          playerName: player.name,
+          phone: player.phone,
+          expectedAmount: baseAmount,
+          amountPaid,
+          balance,
+          carryoverAmount,
+          totalAmount,
+          paymentCount: pitchPayments.length,
+          lastPaymentDate,
+          status,
+          monthKey,
+        });
+      }
+    }
+
+    // Calculate summary
     const summary = {
-      startDate: startDate || null,
-      endDate: endDate || null,
-      totalPlayers: reportData.length,
-      totalExpected: reportData.reduce((sum, p) => sum + p.expectedAmount, 0),
+      month: month === 'all' ? 'all' : parseInt(month),
+      year,
+      totalPlayers: new Set(reportData.map(r => r.playerId)).size,
+      totalExpected: reportData.reduce((sum, p) => sum + p.totalAmount, 0),
       totalPaid: reportData.reduce((sum, p) => sum + p.amountPaid, 0),
       totalBalance: reportData.reduce((sum, p) => sum + p.balance, 0),
+      totalCarryover: reportData.reduce((sum, p) => sum + p.carryoverAmount, 0),
       completeCount: reportData.filter(p => p.status === 'Complete').length,
-      partialCount: reportData.filter(p => p.status === 'Partial').length,
-      unpaidCount: reportData.filter(p => p.status === 'Unpaid').length,
+      incompleteCount: reportData.filter(p => p.status === 'Incomplete').length,
     };
-
-    const paginatedData = limit > 0
-      ? reportData.slice(offset, offset + limit)
-      : reportData;
 
     return successResponse({
       summary,
-      data: paginatedData,
+      data: reportData,
       totalRecords: reportData.length,
-      hasMore: limit > 0 && (offset + limit) < reportData.length
     });
   } catch (error) {
     console.error('Pitch report error:', error);

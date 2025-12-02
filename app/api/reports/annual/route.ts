@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface PlayerAnnualData {
@@ -24,43 +24,60 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const year = searchParams.get('year') || new Date().getFullYear().toString();
-    const limit = parseInt(searchParams.get('limit') || '0'); // 0 = all data (for PDF)
-    const offset = parseInt(searchParams.get('offset') || '0');
+    const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString());
 
-    // Fetch all players and payments in parallel
-    const [playersSnapshot, paymentsSnapshot] = await Promise.all([
-      adminDb.collection('players').get(),
-      adminDb.collection('payments').where('paymentType', '==', 'annual').get()
+    // Fetch all players and annual payments in parallel
+    const [playersResult, paymentsResult] = await Promise.all([
+      supabaseAdmin.from('players').select('*'),
+      supabaseAdmin.from('payments')
+        .select('*')
+        .eq('payment_type', 'annual')
+        .order('date', { ascending: false })
     ]);
 
-    const players = playersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const allPayments = paymentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (playersResult.error || paymentsResult.error) {
+      console.error('Error fetching data:', playersResult.error || paymentsResult.error);
+      return errorResponse('Failed to fetch data', 500);
+    }
+
+    const players = (playersResult.data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      phone: p.phone,
+      annual: parseFloat(p.annual.toString()),
+    }));
+
+    const allPayments = (paymentsResult.data || []).map((p: any) => ({
+      id: p.id,
+      playerId: p.player_id,
+      playerName: p.player_name,
+      amount: parseFloat(p.amount.toString()),
+      date: p.date,
+    }));
 
     const reportData: PlayerAnnualData[] = [];
-    const yearInt = parseInt(year);
 
     for (const player of players) {
       // Get payments for selected year
-      const yearPayments = allPayments.filter((p: any) => {
+      const yearPayments = allPayments.filter(p => {
         const paymentYear = new Date(p.date).getFullYear();
-        return p.playerId === player.id && paymentYear === yearInt;
+        return p.playerId === player.id && paymentYear === year;
       });
 
       // Get payments for previous year (for carryover calculation)
-      const previousYearPayments = allPayments.filter((p: any) => {
+      const previousYearPayments = allPayments.filter(p => {
         const paymentYear = new Date(p.date).getFullYear();
-        return p.playerId === player.id && paymentYear === (yearInt - 1);
+        return p.playerId === player.id && paymentYear === (year - 1);
       });
 
       // Calculate amounts
-      const expectedAmount = player.annual || 150000; // Default annual fee
-      const amountPaid = yearPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+      const expectedAmount = player.annual || 150000;
+      const amountPaid = yearPayments.reduce((sum, p) => sum + p.amount, 0);
 
       // Calculate carryover from previous year (only for 2026+)
       let carryover = 0;
-      if (yearInt >= 2026) {
-        const previousYearPaid = previousYearPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+      if (year >= 2026) {
+        const previousYearPaid = previousYearPayments.reduce((sum, p) => sum + p.amount, 0);
         const previousYearExpected = player.annual || 150000;
         carryover = Math.max(0, previousYearExpected - previousYearPaid);
       }
@@ -69,7 +86,7 @@ export async function GET(request: NextRequest) {
       const balance = totalDue - amountPaid;
 
       // Get last payment date
-      const sortedPayments = yearPayments.sort((a: any, b: any) =>
+      const sortedPayments = yearPayments.sort((a, b) =>
         new Date(b.date).getTime() - new Date(a.date).getTime()
       );
       const lastPaymentDate = sortedPayments.length > 0 ? sortedPayments[0].date : null;
@@ -104,6 +121,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate summary
     const summary = {
+      year,
       totalPlayers: reportData.length,
       totalExpected: reportData.reduce((sum, p) => sum + p.totalDue, 0),
       totalPaid: reportData.reduce((sum, p) => sum + p.amountPaid, 0),
@@ -114,17 +132,11 @@ export async function GET(request: NextRequest) {
       unpaidCount: reportData.filter(p => p.status === 'Unpaid').length,
     };
 
-    // Apply pagination if limit is specified
-    const paginatedData = limit > 0
-      ? reportData.slice(offset, offset + limit)
-      : reportData;
-
     return successResponse({
-      year: yearInt,
+      year,
       summary,
-      data: paginatedData,
+      data: reportData,
       totalRecords: reportData.length,
-      hasMore: limit > 0 && (offset + limit) < reportData.length
     });
   } catch (error) {
     console.error('Annual report error:', error);

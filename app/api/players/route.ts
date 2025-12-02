@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreatePlayerRequest } from '@/lib/types';
 
@@ -17,23 +17,37 @@ export async function POST(request: NextRequest) {
       return errorResponse('Name and phone are required', 400);
     }
 
-    const playerRef = adminDb.collection('players').doc();
-    const now = new Date().toISOString();
+    const { data: player, error } = await supabaseAdmin
+      .from('players')
+      .insert({
+        name,
+        phone,
+        annual,
+        monthly,
+        pitch,
+        match_day: matchDay || null,
+      })
+      .select()
+      .single();
 
-    const newPlayer = {
-      name,
-      phone,
-      annual,
-      monthly,
-      pitch,
-      matchDay: matchDay || null,
-      createdAt: now,
-      updatedAt: now,
+    if (error) {
+      console.error('Create player error:', error);
+      return errorResponse('Failed to create player', 500);
+    }
+
+    const response = {
+      id: player.id,
+      name: player.name,
+      phone: player.phone,
+      annual: parseFloat(player.annual.toString()),
+      monthly: parseFloat(player.monthly.toString()),
+      pitch: parseFloat(player.pitch.toString()),
+      matchDay: player.match_day,
+      createdAt: player.created_at,
+      updatedAt: player.updated_at,
     };
 
-    await playerRef.set(newPlayer);
-
-    return successResponse({ id: playerRef.id, ...newPlayer }, 201);
+    return successResponse(response, 201);
   } catch (error) {
     console.error('Create player error:', error);
     return errorResponse('Internal server error', 500);
@@ -52,28 +66,40 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '100');
     const search = searchParams.get('search');
 
-    let query = adminDb.collection('players').orderBy('name');
+    let query = supabaseAdmin
+      .from('players')
+      .select('*')
+      .order('name', { ascending: true })
+      .range(skip, skip + limit - 1);
 
-    if (search) {
-      const playersSnapshot = await query.get();
-      const filteredPlayers = playersSnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .filter(player => {
-          const searchLower = search.toLowerCase();
-          return (
-            player.name.toLowerCase().includes(searchLower) ||
-            player.phone.includes(search)
-          );
-        })
-        .slice(skip, skip + limit);
+    const { data: players, error } = await query;
 
-      return successResponse(filteredPlayers);
+    if (error) {
+      console.error('Get players error:', error);
+      return errorResponse('Failed to fetch players', 500);
     }
 
-    const snapshot = await query.limit(limit).offset(skip).get();
-    const players = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    let filteredPlayers = (players || []).map((player: any) => ({
+      id: player.id,
+      name: player.name,
+      phone: player.phone,
+      annual: parseFloat(player.annual.toString()),
+      monthly: parseFloat(player.monthly.toString()),
+      pitch: parseFloat(player.pitch.toString()),
+      matchDay: player.match_day,
+      createdAt: player.created_at,
+      updatedAt: player.updated_at,
+    }));
 
-    return successResponse(players);
+    if (search) {
+      const searchLower = search.toLowerCase();
+      filteredPlayers = filteredPlayers.filter(player =>
+        player.name.toLowerCase().includes(searchLower) ||
+        player.phone.includes(search)
+      );
+    }
+
+    return successResponse(filteredPlayers);
   } catch (error) {
     console.error('Get players error:', error);
     return errorResponse('Internal server error', 500);

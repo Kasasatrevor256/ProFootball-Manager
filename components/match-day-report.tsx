@@ -158,34 +158,27 @@ export function MatchDayReport() {
       const selectedMatchDayData = matchDays.find(md => md.id === matchDayId)
       if (!selectedMatchDayData) return
 
-      // Fetch payments and expenses for this specific match day
-      const [paymentsRes, expensesRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/payments?limit=100`, {
+      // Fetch report data from backend API
+      const response = await fetch(
+        `${API_BASE_URL}/api/reports/match-day?match_day_id=${matchDayId}`,
+        {
+          method: "GET",
           headers: getAuthHeaders(),
           credentials: "include",
-        }),
-        fetch(`${API_BASE_URL}/api/expenses?match_day_id=${matchDayId}`, {
-          headers: getAuthHeaders(),
-          credentials: "include",
-        })
-      ])
-
-      if (!paymentsRes.ok || !expensesRes.ok) {
-        throw new Error("Failed to load payments and expenses")
-      }
-
-      const allPayments = await paymentsRes.json()
-      const expenses = await expensesRes.json()
-
-      // Filter payments for this specific match day
-      const matchDayPayments = allPayments.filter((payment: Payment) => 
-        payment.date === selectedMatchDayData.match_date && payment.paymentType === "matchday"
+        }
       )
 
-      // Calculate player contributions
+      if (!response.ok) {
+        throw new Error("Failed to load match day report")
+      }
+
+      const apiData = await response.json()
+
+      // Transform backend data to match frontend format
       const playerContributions: PlayerContribution[] = players.map(player => {
-        const playerPayment = matchDayPayments.find((payment: Payment) => 
-          payment.playerId === player.id
+        const payments = apiData.payments || []
+        const playerPayment = payments.find((p: any) => 
+          p.playerId === player.id
         )
         
         return {
@@ -195,12 +188,18 @@ export function MatchDayReport() {
         }
       })
 
-      // Calculate totals
-      const totalPlayerContributions = playerContributions.reduce(
-        (sum, pc) => sum + pc.matchDayPayment, 0
-      )
-      const totalExpenses = expenses.reduce((sum: number, expense: Expense) => sum + expense.amount, 0)
-      const netAmount = totalPlayerContributions - totalExpenses
+      const expenses: Expense[] = (apiData.expenses || []).map((e: any) => ({
+        id: e.id,
+        description: e.description || '',
+        category: e.category,
+        amount: e.amount,
+        expense_date: e.expense_date || selectedMatchDayData.match_date,
+        createdAt: e.created_at || '',
+      }))
+
+      const totalPlayerContributions = apiData.totalPayments || 0
+      const totalExpenses = apiData.totalExpenses || 0
+      const netAmount = apiData.netBalance || 0
       const contributingPlayers = playerContributions.filter(pc => pc.contributed).length
       const contributionRate = players.length > 0 ? (contributingPlayers / players.length) * 100 : 0
 
