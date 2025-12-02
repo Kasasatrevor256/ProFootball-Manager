@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('Create payment error:', error);
-      return errorResponse('Failed to create payment', 500);
+      return errorResponse('Failed to create payment', 500, { internal: error, request });
     }
 
     // Map snake_case to camelCase for response
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     return successResponse(response, 201);
   } catch (error) {
     console.error('Create payment error:', error);
-    return errorResponse('Internal server error', 500);
+    return errorResponse('Internal server error', 500, { internal: error, request });
   }
 }
 
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error('Get payments error:', error);
-      return errorResponse('Failed to fetch payments', 500);
+      return errorResponse('Failed to fetch payments', 500, { internal: error, request });
     }
 
     // Map snake_case to camelCase for frontend
@@ -113,6 +113,6 @@ export async function GET(request: NextRequest) {
     return successResponse(mappedPayments);
   } catch (error) {
     console.error('Get payments error:', error);
-    return errorResponse('Internal server error', 500);
+    return errorResponse('Internal server error', 500, { internal: error, request });
   }
 }

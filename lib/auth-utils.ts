@@ -89,8 +89,35 @@ export function forbiddenResponse(message = 'Forbidden') {
   });
 }
 
-export function errorResponse(message: string, status = 500) {
-  return new Response(JSON.stringify({ error: message }), {
+export function errorResponse(
+  message: string,
+  status = 500,
+  opts?: { internal?: any; request?: NextRequest }
+) {
+  const body: Record<string, any> = { error: message };
+
+  // Decide whether to include internal error information:
+  // - Always include in non-production for easier debugging.
+  // - In production, include only when the incoming request has header `x-debug: true`.
+  let includeInternal = false;
+  try {
+    if (process.env.NODE_ENV !== 'production') {
+      includeInternal = true;
+    } else if (opts?.request && typeof opts.request.headers?.get === 'function') {
+      const debugHeader = opts.request.headers.get('x-debug');
+      if (debugHeader === 'true') {
+        includeInternal = true;
+      }
+    }
+  } catch (e) {
+    // ignore header parsing errors and do not include internal details
+  }
+
+  if (includeInternal && opts?.internal) {
+    body.internal = opts.internal;
+  }
+
+  return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
