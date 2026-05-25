@@ -111,7 +111,7 @@ export function AnnualReport() {
         console.log(`Previous year (${previousYear}) obligation: UGX ${annualObligation.toLocaleString()}`)
         console.log(`Previous year payments: UGX ${totalPaid.toLocaleString()}`)
         console.log(`Carryover balance: UGX ${balance.toLocaleString()}`)
-        console.log(`Payment dates found:`, playerPayments.map(p => p.date))
+        console.log(`Payment dates found:`, playerPayments.map((p: any) => p.date))
       } else if (totalPaid > 0) {
         console.log(`✅ ${player.name} - Fully paid ${previousYear} (UGX ${totalPaid.toLocaleString()})`)
       } else {

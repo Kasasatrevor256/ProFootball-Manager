@@ -446,7 +446,7 @@ export function DailyPaymentReport(){
             <tbody>
               ${filteredExpenses.map(expense => `
                 <tr class="expense-row">
-                  <td>${formatTime(expense.created_at)}</td>
+                  <td>${formatTime(expense.createdAt)}</td>
                   <td><strong>${expense.description}</strong></td>
                   <td>${expense.category}</td>
                   <td class="amount">UGX ${formatAmount(expense.amount)}</td>
