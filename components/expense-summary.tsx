@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Receipt, Loader2 } from "lucide-react"
+import { Receipt, Loader2, ArrowRight } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useMobile } from "@/hooks/use-mobile"
+import Link from "next/link"
 
 // API configuration
 const API_BASE_URL = ""
@@ -138,13 +139,25 @@ export function ExpenseSummary() {
   if (isLoading) {
     return (
       <Card className="dashboard-card border-0 overflow-visible">
-        <CardHeader className="pb-3 border-b">
-          <CardTitle className="text-lg sm:text-xl font-bold">Recent Expenses</CardTitle>
-          <CardDescription className="text-sm mt-1">Loading recent expenses...</CardDescription>
+        <CardHeader className="pb-3 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg sm:text-xl font-bold">Recent Expenses</CardTitle>
+              <CardDescription className="text-sm mt-1">Loading recent expenses...</CardDescription>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+              <Receipt className="h-5 w-5 text-red-600" />
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="pt-6">
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin" />
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex gap-4">
+                <div className="h-4 bg-gray-200 rounded animate-pulse flex-1" />
+                <div className="h-4 bg-gray-200 rounded animate-pulse w-24" />
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -153,12 +166,12 @@ export function ExpenseSummary() {
 
   return (
     <Card className="dashboard-card border-0 overflow-visible">
-      <CardHeader className="pb-3 border-b">
+      <CardHeader className="pb-3 border-b border-gray-100">
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="text-lg sm:text-xl font-bold">Recent Expenses</CardTitle>
             <CardDescription className="text-sm mt-1">
-              {expenses.length > 0 
+              {expenses.length > 0
                 ? `Total expenses: UGX ${formatAmount(totalExpenses)}`
                 : "No expenses recorded yet."
               }
@@ -181,8 +194,8 @@ export function ExpenseSummary() {
         ) : (
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-white">
+              <TableHeader className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm shadow-sm">
+                <TableRow>
                   <TableHead className="font-medium">Description</TableHead>
                   <TableHead className="font-medium">Category</TableHead>
                   <TableHead className="font-medium">Match Day</TableHead>
@@ -191,7 +204,7 @@ export function ExpenseSummary() {
               </TableHeader>
               <TableBody>
                 {expenses.map((expense) => (
-                  <TableRow key={expense.id} className="hover:bg-gray-50">
+                  <TableRow key={expense.id} className="hover:bg-gray-50 transition-colors duration-150">
                     <TableCell className="font-medium">{expense.description}</TableCell>
                     <TableCell>
                       <span
@@ -210,13 +223,24 @@ export function ExpenseSummary() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right font-medium">
+                    <TableCell className="text-right font-semibold tabular-nums">
                       UGX {formatAmount(expense.amount)}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+          </div>
+        )}
+        {expenses.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <Link
+              href="/expenses"
+              className="flex items-center justify-end gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors"
+            >
+              View all expenses
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
         )}
       </CardContent>

@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import { DashboardHeader } from "@/components/dashboard-header"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { PaymentSummary } from "@/components/payment-summary"
+import { Home } from "lucide-react"
 
 // Lazy load heavy components with loading fallback
 const RecentPayments = dynamic(() => import('@/components/recent-payments').then(mod => ({ default: mod.RecentPayments })), {
@@ -24,7 +25,15 @@ const ExpenseSummary = dynamic(() => import('@/components/expense-summary').then
 export default function DashboardPage() {
   return (
     <DashboardShell>
-      <DashboardHeader heading="Dashboard" text="Overview of team finances and activities" />
+      <DashboardHeader
+        heading={
+          <span className="flex items-center gap-2">
+            <Home className="h-7 w-7 text-blue-600" />
+            Dashboard
+          </span>
+        }
+        text="Overview of team finances and activities"
+      />
 
       {/* Payment Summary Cards - Loads first (most important) */}
       <PaymentSummary />

@@ -1,17 +1,32 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
-import { Search, Edit, Trash2, Calendar, ChevronLeft, ChevronRight, Loader2, Plus, AlertTriangle } from "lucide-react"
+import { Search, Edit, Trash2, Calendar, ChevronLeft, ChevronRight, Loader2, Plus, AlertTriangle, SearchX, Inbox } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import Link from "next/link"
 import { EditPaymentModal } from "@/components/edit-payment-modal"
 import { getCachedData, setCachedData, invalidateCacheOnMutation } from "@/lib/api-cache"
 
-// API configuration
 const API_BASE_URL = ""
+
+const PAYMENT_TYPE_STYLES: Record<string, string> = {
+  annual:   'bg-blue-100 text-blue-800 border-blue-200',
+  monthly:  'bg-purple-100 text-purple-800 border-purple-200',
+  pitch:    'bg-green-100 text-green-800 border-green-200',
+  matchday: 'bg-orange-100 text-orange-800 border-orange-200',
+}
 
 interface Payment {
   id: string
@@ -33,38 +48,36 @@ export function PaymentsList() {
   const [typeFilter, setTypeFilter] = useState<string>("all")
   const [currentPage, setCurrentPage] = useState(1)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
-  
-  // Edit modal state
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
-  
   const { toast } = useToast()
-  
+
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const handleSearch = useCallback((value: string) => {
+    if (searchTimeout.current !== undefined) clearTimeout(searchTimeout.current)
+    searchTimeout.current = setTimeout(() => setSearchTerm(value), 300)
+  }, [])
+
   const itemsPerPage = 10
 
-  // Helper function to get auth headers
   const getAuthHeaders = () => {
     const headers: Record<string, string> = {}
-    
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("auth_token")
       if (token) {
         headers["Authorization"] = `Bearer ${token}`
       }
     }
-    
     return headers
   }
 
-  // Fetch payments from API with caching - fetches all payments
   const fetchPayments = async () => {
     setIsLoading(true)
     setError(null)
 
     try {
       const cacheKey = `payments-all`
-
-      // Check cache first
       const cachedData = getCachedData(cacheKey)
       if (cachedData) {
         setPayments(cachedData)
@@ -72,7 +85,6 @@ export function PaymentsList() {
         return
       }
 
-      // Fetch all payments in batches
       const allPayments: Payment[] = []
       let skip = 0
       const limit = 100
@@ -101,10 +113,8 @@ export function PaymentsList() {
       setCachedData(cacheKey, allPayments)
       setPayments(allPayments)
     } catch (error) {
-      console.error("❌ Error fetching payments:", error)
       const errorMessage = error instanceof Error ? error.message : "Failed to load payments"
       setError(errorMessage)
-      
       toast({
         title: "Error loading payments",
         description: errorMessage,
@@ -115,30 +125,24 @@ export function PaymentsList() {
     }
   }
 
-  // Handle edit payment
   const handleEditPayment = (payment: Payment) => {
     setEditingPayment(payment)
     setEditModalOpen(true)
   }
 
-  // Handle payment updated
   const handlePaymentUpdated = (updatedPayment: Payment) => {
-    setPayments(payments.map(payment => 
+    setPayments(payments.map(payment =>
       payment.id === updatedPayment.id ? updatedPayment : payment
     ))
   }
 
-  // Delete payment
   const handleDeletePayment = async (paymentId: string, playerName: string, amount: number) => {
     if (!confirm(`Are you sure you want to delete the payment of UGX ${amount.toLocaleString()} for ${playerName}? This action cannot be undone.`)) {
       return
     }
 
     setIsDeleting(paymentId)
-    
     try {
-      console.log("🗑️ Deleting payment:", paymentId)
-      
       const response = await fetch(`${API_BASE_URL}/api/payments/${paymentId}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
@@ -150,23 +154,14 @@ export function PaymentsList() {
         throw new Error(errorData.detail || `Failed to delete payment: ${response.status}`)
       }
 
-      console.log("✅ Payment deleted successfully")
-
-      // Invalidate cache
       invalidateCacheOnMutation('payment')
-
-      // Remove payment from local state
       setPayments(payments.filter(payment => payment.id !== paymentId))
-
       toast({
         title: "Payment deleted",
         description: `Payment of UGX ${amount.toLocaleString()} for ${playerName} has been removed.`,
       })
-      
     } catch (error) {
-      console.error("❌ Error deleting payment:", error)
       const errorMessage = error instanceof Error ? error.message : "Failed to delete payment"
-      
       toast({
         title: "Error deleting payment",
         description: errorMessage,
@@ -177,57 +172,36 @@ export function PaymentsList() {
     }
   }
 
-  // Load payments on component mount
   useEffect(() => {
     fetchPayments()
   }, [])
 
-  // Filter payments based on search term and type
   const filteredPayments = payments.filter(
     (payment) =>
       payment.playerName.toLowerCase().includes(searchTerm.toLowerCase()) &&
       (typeFilter === "all" || payment.paymentType === typeFilter),
   )
 
-  // Pagination logic
   const totalPages = Math.ceil(filteredPayments.length / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
   const paginatedPayments = filteredPayments.slice(startIndex, startIndex + itemsPerPage)
 
-  // Reset to first page when search or filter changes
   useEffect(() => {
     setCurrentPage(1)
   }, [searchTerm, typeFilter])
 
-  // Helper function to format payment type
   const formatPaymentType = (type: string) => {
     switch (type) {
-      case "annual": return "Annual Subscription"
-      case "monthly": return "Monthly Subscription"
-      case "pitch": return "Pitch Payment"
-      case "matchday": return "Match Day Payment"
+      case "annual": return "Annual"
+      case "monthly": return "Monthly"
+      case "pitch": return "Pitch"
+      case "matchday": return "Match Day"
       default: return type
     }
   }
 
-  // Calculate total amounts for summary
   const totalAmount = filteredPayments.reduce((sum, payment) => sum + payment.amount, 0)
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="w-full space-y-4">
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
-            <p className="text-gray-600">Loading payments...</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Error state
   if (error) {
     return (
       <div className="w-full space-y-4">
@@ -235,9 +209,7 @@ export function PaymentsList() {
           <div className="text-center">
             <AlertTriangle className="h-8 w-8 mx-auto mb-4 text-red-600" />
             <p className="text-gray-600 mb-4">{error}</p>
-            <Button onClick={fetchPayments} variant="outline">
-              Try Again
-            </Button>
+            <Button onClick={fetchPayments} variant="outline">Try Again</Button>
           </div>
         </div>
       </div>
@@ -246,21 +218,21 @@ export function PaymentsList() {
 
   return (
     <div className="w-full space-y-4">
-      {/* Filters and Search */}
       <div className="flex flex-col lg:flex-row items-center gap-4">
         <div className="flex items-center gap-2 w-full lg:w-auto">
           <Search className="w-4 h-4 text-gray-500" />
           <Input
             placeholder="Search payments..."
-            className="w-full lg:w-64 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full lg:w-64"
+            defaultValue={searchTerm}
+            onChange={(e) => handleSearch(e.target.value)}
+            disabled={isLoading}
           />
         </div>
         <div className="flex items-center gap-2 w-full lg:w-auto">
           <Calendar className="w-4 h-4 text-gray-500" />
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-full lg:w-48 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <Select value={typeFilter} onValueChange={setTypeFilter} disabled={isLoading}>
+            <SelectTrigger className="w-full lg:w-48">
               <SelectValue placeholder="Payment Type" />
             </SelectTrigger>
             <SelectContent>
@@ -272,11 +244,9 @@ export function PaymentsList() {
             </SelectContent>
           </Select>
         </div>
-
-        {/* Add Payment Button */}
         <div className="ml-auto">
           <Link href="/payments/new">
-            <Button>
+            <Button className="transition-all duration-150">
               <Plus className="w-4 h-4 mr-2" />
               Record Payment
             </Button>
@@ -284,118 +254,120 @@ export function PaymentsList() {
         </div>
       </div>
 
-      {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <div className="text-sm text-gray-600">Total Payments</div>
-          <div className="text-2xl font-bold text-gray-900">{filteredPayments.length}</div>
+          <div className="text-2xl font-bold text-gray-900 tabular-nums">{filteredPayments.length}</div>
         </div>
         <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <div className="text-sm text-gray-600">Total Amount</div>
-          <div className="text-2xl font-bold text-green-600">UGX {totalAmount.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-green-600 tabular-nums">UGX {totalAmount.toLocaleString()}</div>
         </div>
         <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <div className="text-sm text-gray-600">Average Payment</div>
-          <div className="text-2xl font-bold text-blue-600">
+          <div className="text-2xl font-bold text-blue-600 tabular-nums">
             UGX {filteredPayments.length > 0 ? Math.round(totalAmount / filteredPayments.length).toLocaleString() : "0"}
           </div>
         </div>
       </div>
 
-      {/* Payments Table */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        {paginatedPayments.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-gray-500 text-lg mb-2">
-              {searchTerm || typeFilter !== "all" ? "No payments found matching your criteria" : "No payments recorded yet"}
-            </p>
-            {!searchTerm && typeFilter === "all" && (
-              <Link href="/payments/new">
-                <Button>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Record First Payment
-                </Button>
-              </Link>
+        {!isLoading && paginatedPayments.length === 0 ? (
+          <div className="text-center py-16">
+            {searchTerm || typeFilter !== "all" ? (
+              <>
+                <SearchX className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-gray-700 text-lg font-medium mb-1">No payments found</p>
+                <p className="text-gray-500 text-sm">No payments match your current filters. Try adjusting your search.</p>
+              </>
+            ) : (
+              <>
+                <Inbox className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-gray-700 text-lg font-medium mb-1">No payments yet</p>
+                <p className="text-gray-500 text-sm mb-4">Start recording payments to track team finances.</p>
+                <Link href="/payments/new">
+                  <Button>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Record First Payment
+                  </Button>
+                </Link>
+              </>
             )}
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Player
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Type
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {paginatedPayments.map((payment) => (
-                <tr key={payment.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {payment.playerName}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      payment.paymentType === "annual" ? "bg-purple-100 text-purple-800" :
-                      payment.paymentType === "monthly" ? "bg-blue-100 text-blue-800" :
-                      payment.paymentType === "pitch" ? "bg-green-100 text-green-800" :
-                      "bg-orange-100 text-orange-800"
-                    }`}>
-                      {formatPaymentType(payment.paymentType)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    UGX {payment.amount.toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {new Date(payment.date).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric'
-                    })}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end gap-2">
-                      <button 
-                        onClick={() => handleEditPayment(payment)}
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                      >
-                        <Edit className="h-4 w-4" />
-                        <span className="sr-only">Edit payment</span>
-                      </button>
-                      <button 
-                        onClick={() => handleDeletePayment(payment.id, payment.playerName, payment.amount)}
-                        disabled={isDeleting === payment.id}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
-                      >
-                        {isDeleting === payment.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                        <span className="sr-only">Delete payment</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm shadow-sm">
+              <TableRow>
+                <TableHead>Player</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading
+                ? Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      {Array.from({ length: 5 }).map((_, j) => (
+                        <TableCell key={j}>
+                          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                : paginatedPayments.map((payment) => (
+                    <TableRow key={payment.id} className="hover:bg-gray-50 transition-colors duration-150 cursor-pointer">
+                      <TableCell className="font-medium">{payment.playerName}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={PAYMENT_TYPE_STYLES[payment.paymentType] || 'bg-gray-100 text-gray-800 border-gray-200'}
+                        >
+                          {formatPaymentType(payment.paymentType)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        UGX {payment.amount.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(payment.date).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => handleEditPayment(payment)}
+                            className="h-8 w-8 inline-flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all duration-150"
+                          >
+                            <Edit className="h-4 w-4" />
+                            <span className="sr-only">Edit payment</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeletePayment(payment.id, payment.playerName, payment.amount)}
+                            disabled={isDeleting === payment.id}
+                            className="h-8 w-8 inline-flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-150 disabled:opacity-50"
+                          >
+                            {isDeleting === payment.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                            <span className="sr-only">Delete payment</span>
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+              }
+            </TableBody>
+          </Table>
         )}
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between py-4">
           <div className="text-sm text-gray-700">
@@ -405,18 +377,16 @@ export function PaymentsList() {
             <button
               onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
               disabled={currentPage === 1}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 transition-all duration-150"
             >
               <ChevronLeft className="h-4 w-4" />
               Previous
             </button>
-            <div className="text-sm text-gray-700">
-              Page {currentPage} of {totalPages}
-            </div>
+            <div className="text-sm text-gray-700">Page {currentPage} of {totalPages}</div>
             <button
               onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
               disabled={currentPage === totalPages}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 transition-all duration-150"
             >
               Next
               <ChevronRight className="h-4 w-4" />
@@ -425,7 +395,6 @@ export function PaymentsList() {
         </div>
       )}
 
-      {/* Edit Payment Modal */}
       {editingPayment && (
         <EditPaymentModal
           isOpen={editModalOpen}

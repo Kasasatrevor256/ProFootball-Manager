@@ -1,6 +1,6 @@
 import type React from "react"
 interface DashboardHeaderProps {
-  heading: string
+  heading: React.ReactNode
   text?: string
   children?: React.ReactNode
 }

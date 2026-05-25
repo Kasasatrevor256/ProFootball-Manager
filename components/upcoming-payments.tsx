@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { AlertCircle, Users, Loader2, Calendar, CreditCard, RefreshCw } from "lucide-react"
+import { AlertCircle, Users, Loader2, Calendar, CreditCard, RefreshCw, ArrowRight } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import Link from "next/link"
 
@@ -477,13 +477,25 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
   if (isLoading) {
     return (
       <Card className="dashboard-card border-0 overflow-visible">
-        <CardHeader className="pb-3 border-b">
-          <CardTitle className="text-lg sm:text-xl font-bold">Upcoming Payments</CardTitle>
-          <CardDescription className="text-sm mt-1">Loading payment status...</CardDescription>
+        <CardHeader className="pb-3 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg sm:text-xl font-bold">Upcoming Payments</CardTitle>
+              <CardDescription className="text-sm mt-1">Loading payment status...</CardDescription>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center">
+              <Calendar className="h-5 w-5 text-orange-600" />
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="pt-6">
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin" />
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="p-4 rounded-lg border">
+                <div className="h-3 bg-gray-200 rounded animate-pulse w-1/3 mb-2" />
+                <div className="h-3 bg-gray-200 rounded animate-pulse w-1/2" />
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -493,9 +505,16 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
   if (error) {
     return (
       <Card className="dashboard-card border-0 overflow-visible">
-        <CardHeader className="pb-3 border-b">
-          <CardTitle className="text-lg sm:text-xl font-bold">Upcoming Payments</CardTitle>
-          <CardDescription className="text-sm mt-1 text-red-600">Error loading data</CardDescription>
+        <CardHeader className="pb-3 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg sm:text-xl font-bold">Upcoming Payments</CardTitle>
+              <CardDescription className="text-sm mt-1 text-red-600">Error loading data</CardDescription>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center">
+              <Calendar className="h-5 w-5 text-orange-600" />
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="pt-6">
           <div className="text-center py-8">
@@ -518,7 +537,7 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
 
   return (
     <Card className="dashboard-card border-0 overflow-visible">
-      <CardHeader className="pb-3 border-b">
+      <CardHeader className="pb-3 border-b border-gray-100">
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="text-lg sm:text-xl font-bold">Upcoming Payments</CardTitle>
@@ -536,8 +555,8 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
                 <span className="text-red-600 font-medium text-xs">{overdueCount} overdue</span>
               </div>
             ) : (
-              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                <Users className="h-5 w-5 text-green-600" />
+              <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center">
+                <Calendar className="h-5 w-5 text-orange-600" />
               </div>
             )}
             <Button
@@ -545,6 +564,7 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
               variant="ghost"
               size="sm"
               disabled={isLoading}
+              className="transition-all duration-150"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             </Button>
@@ -625,7 +645,7 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
                   </div>
                   
                   <Link href="/payments/new">
-                    <Button size="sm" variant="outline" className="text-xs">
+                    <Button size="sm" variant="outline" className="text-xs transition-all duration-150">
                       Record Payment
                     </Button>
                   </Link>
@@ -633,14 +653,16 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
               </div>
             ))}
             
-            <div className="text-center pt-4 border-t">
-              <div className="text-xs text-gray-400 mb-2">
+            <div className="pt-3 border-t border-gray-100">
+              <div className="text-xs text-gray-400 mb-2 text-center">
                 Last updated: {lastRefresh.toLocaleTimeString()}
               </div>
-              <Link href="/payments">
-                <Button variant="outline" size="sm">
-                  View All Payments
-                </Button>
+              <Link
+                href="/payments"
+                className="flex items-center justify-end gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors"
+              >
+                View all payments
+                <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
           </div>
