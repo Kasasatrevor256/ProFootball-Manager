@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 export async function GET(request: NextRequest) {
@@ -9,15 +9,9 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    // Get all payments and calculate statistics
-    const { data: payments, error } = await supabaseAdmin
-      .from('payments')
-      .select('payment_type, amount');
-
-    if (error) {
-      console.error('Payment summary error:', error);
-      return errorResponse('Failed to fetch payments', 500);
-    }
+    const payments = db
+      .prepare('SELECT payment_type, amount FROM payments')
+      .all() as any[];
 
     const stats = {
       annual_total: 0,
@@ -25,10 +19,10 @@ export async function GET(request: NextRequest) {
       pitch_total: 0,
       matchday_total: 0,
       total_amount: 0,
-      total_payments: payments?.length || 0
+      total_payments: payments.length,
     };
 
-    (payments || []).forEach((payment: any) => {
+    payments.forEach((payment) => {
       const amount = parseFloat(payment.amount.toString()) || 0;
       stats.total_amount += amount;
 

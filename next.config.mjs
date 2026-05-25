@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Enable Next.js instrumentation hook (runs instrumentation.ts on server start)
+  instrumentationHook: true,
+
   // Your existing settings
   eslint: {
     ignoreDuringBuilds: true,
@@ -10,6 +13,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Required for Electron desktop packaging — creates a self-contained server bundle
+  output: 'standalone',
   
   // Additional production settings for error handling
   reactStrictMode: true,

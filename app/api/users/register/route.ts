@@ -1,23 +1,18 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, forbiddenResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreateUserRequest, UserRole, UserStatus } from '@/lib/types';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
     const authUser = await getAuthUser(request);
     if (!authUser) {
       return unauthorizedResponse();
     }
 
-    // Get user role from Supabase
-    const { data: currentUser } = await supabaseAdmin
-      .from('users')
-      .select('role')
-      .eq('id', authUser.uid)
-      .single();
+    const currentUser = db.prepare('SELECT role FROM users WHERE id = ?').get(authUser.uid) as any;
 
     if (!currentUser || currentUser.role !== UserRole.ADMIN) {
       return forbiddenResponse('Admin access required');
@@ -30,38 +25,23 @@ export async function POST(request: NextRequest) {
       return errorResponse('All fields are required', 400);
     }
 
-    // Check if user already exists
-    const { data: existingUser } = await supabaseAdmin
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .limit(1)
-      .single();
-
+    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as any;
     if (existingUser) {
       return errorResponse('User with this email already exists', 400);
     }
 
-    // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
 
-    // Create user in Supabase
-    const { data: newUser, error } = await supabaseAdmin
-      .from('users')
-      .insert({
-        name,
-        email,
-        role,
-        status: UserStatus.ACTIVE,
-        password_hash: passwordHash,
-      })
-      .select('id, name, email, role, status, created_at, updated_at')
-      .single();
+    db.prepare(
+      `INSERT INTO users (id, name, email, role, status, password_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, name, email, role, UserStatus.ACTIVE, passwordHash, now, now);
 
-    if (error) {
-      console.error('Create user error:', error);
-      return errorResponse('Failed to create user', 500);
-    }
+    const newUser = db
+      .prepare('SELECT id, name, email, role, status, created_at, updated_at FROM users WHERE id = ?')
+      .get(id) as any;
 
     return successResponse({
       id: newUser.id,

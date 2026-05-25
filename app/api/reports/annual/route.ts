@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface PlayerAnnualData {
@@ -26,28 +26,19 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString());
 
-    // Fetch all players and annual payments in parallel
-    const [playersResult, paymentsResult] = await Promise.all([
-      supabaseAdmin.from('players').select('*'),
-      supabaseAdmin.from('payments')
-        .select('*')
-        .eq('payment_type', 'annual')
-        .order('date', { ascending: false })
-    ]);
+    const playerRows = db.prepare('SELECT * FROM players').all() as any[];
+    const paymentRows = db
+      .prepare("SELECT * FROM payments WHERE payment_type = 'annual' ORDER BY date DESC")
+      .all() as any[];
 
-    if (playersResult.error || paymentsResult.error) {
-      console.error('Error fetching data:', playersResult.error || paymentsResult.error);
-      return errorResponse('Failed to fetch data', 500);
-    }
-
-    const players = (playersResult.data || []).map((p: any) => ({
+    const players = playerRows.map((p) => ({
       id: p.id,
       name: p.name,
       phone: p.phone,
       annual: parseFloat(p.annual.toString()),
     }));
 
-    const allPayments = (paymentsResult.data || []).map((p: any) => ({
+    const allPayments = paymentRows.map((p) => ({
       id: p.id,
       playerId: p.player_id,
       playerName: p.player_name,
@@ -58,23 +49,19 @@ export async function GET(request: NextRequest) {
     const reportData: PlayerAnnualData[] = [];
 
     for (const player of players) {
-      // Get payments for selected year
-      const yearPayments = allPayments.filter(p => {
+      const yearPayments = allPayments.filter((p) => {
         const paymentYear = new Date(p.date).getFullYear();
         return p.playerId === player.id && paymentYear === year;
       });
 
-      // Get payments for previous year (for carryover calculation)
-      const previousYearPayments = allPayments.filter(p => {
+      const previousYearPayments = allPayments.filter((p) => {
         const paymentYear = new Date(p.date).getFullYear();
-        return p.playerId === player.id && paymentYear === (year - 1);
+        return p.playerId === player.id && paymentYear === year - 1;
       });
 
-      // Calculate amounts
       const expectedAmount = player.annual || 150000;
       const amountPaid = yearPayments.reduce((sum, p) => sum + p.amount, 0);
 
-      // Calculate carryover from previous year (only for 2026+)
       let carryover = 0;
       if (year >= 2026) {
         const previousYearPaid = previousYearPayments.reduce((sum, p) => sum + p.amount, 0);
@@ -85,13 +72,11 @@ export async function GET(request: NextRequest) {
       const totalDue = expectedAmount + carryover;
       const balance = totalDue - amountPaid;
 
-      // Get last payment date
-      const sortedPayments = yearPayments.sort((a, b) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
+      const sortedPayments = yearPayments.sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
       );
       const lastPaymentDate = sortedPayments.length > 0 ? sortedPayments[0].date : null;
 
-      // Determine status
       let status: 'Complete' | 'Partial' | 'Unpaid';
       if (amountPaid >= totalDue) {
         status = 'Complete';
@@ -112,14 +97,12 @@ export async function GET(request: NextRequest) {
         totalDue,
         lastPaymentDate,
         paymentCount: yearPayments.length,
-        status
+        status,
       });
     }
 
-    // Sort by balance (highest first)
     reportData.sort((a, b) => b.balance - a.balance);
 
-    // Calculate summary
     const summary = {
       year,
       totalPlayers: reportData.length,
@@ -127,9 +110,9 @@ export async function GET(request: NextRequest) {
       totalPaid: reportData.reduce((sum, p) => sum + p.amountPaid, 0),
       totalBalance: reportData.reduce((sum, p) => sum + p.balance, 0),
       totalCarryover: reportData.reduce((sum, p) => sum + p.carryover, 0),
-      completeCount: reportData.filter(p => p.status === 'Complete').length,
-      partialCount: reportData.filter(p => p.status === 'Partial').length,
-      unpaidCount: reportData.filter(p => p.status === 'Unpaid').length,
+      completeCount: reportData.filter((p) => p.status === 'Complete').length,
+      partialCount: reportData.filter((p) => p.status === 'Partial').length,
+      unpaidCount: reportData.filter((p) => p.status === 'Unpaid').length,
     };
 
     return successResponse({

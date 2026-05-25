@@ -56,7 +56,7 @@ export function RecentPayments() {
         }
 
         const data = await response.json()
-        setPayments(data)
+        setPayments(data.data ?? data)
       } catch (error) {
         console.error("Error loading recent payments:", error)
         toast({

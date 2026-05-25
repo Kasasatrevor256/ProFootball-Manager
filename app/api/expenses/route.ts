@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreateExpenseRequest } from '@/lib/types';
+import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,23 +18,18 @@ export async function POST(request: NextRequest) {
       return errorResponse('Description, category, and amount are required', 400);
     }
 
-    const { data: expense, error } = await supabaseAdmin
-      .from('expenses')
-      .insert({
-        description,
-        category,
-        amount,
-        expense_date: expenseDate || new Date().toISOString().split('T')[0],
-        match_day_id: matchDayId || null,
-        created_by: authUser.uid,
-      })
-      .select()
-      .single();
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const date = expenseDate
+      ? (typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString().split('T')[0])
+      : new Date().toISOString().split('T')[0];
 
-    if (error) {
-      console.error('Create expense error:', error);
-      return errorResponse('Failed to create expense', 500);
-    }
+    db.prepare(
+      `INSERT INTO expenses (id, description, category, amount, expense_date, match_day_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, description, category, amount, date, matchDayId ?? null, authUser.uid, now, now);
+
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id) as any;
 
     return successResponse({
       id: expense.id,
@@ -67,34 +63,23 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('start_date');
     const endDate = searchParams.get('end_date');
 
-    let query = supabaseAdmin
-      .from('expenses')
-      .select('*')
-      .order('expense_date', { ascending: false })
-      .range(skip, skip + limit - 1);
+    const conditions: string[] = [];
+    const values: any[] = [];
 
-    // Apply filters
-    if (category) {
-      query = query.eq('category', category);
-    }
-    if (matchDayId) {
-      query = query.eq('match_day_id', matchDayId);
-    }
-    if (startDate) {
-      query = query.gte('expense_date', startDate);
-    }
-    if (endDate) {
-      query = query.lte('expense_date', endDate);
-    }
+    if (category) { conditions.push('category = ?'); values.push(category); }
+    if (matchDayId) { conditions.push('match_day_id = ?'); values.push(matchDayId); }
+    if (startDate) { conditions.push('expense_date >= ?'); values.push(startDate); }
+    if (endDate) { conditions.push('expense_date <= ?'); values.push(endDate); }
 
-    const { data: expenses, error } = await query;
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const total = (db.prepare(`SELECT COUNT(*) as count FROM expenses ${where}`).get(...values) as any).count;
+    values.push(limit, skip);
 
-    if (error) {
-      console.error('Get expenses error:', error);
-      return errorResponse('Failed to fetch expenses', 500);
-    }
+    const rows = db
+      .prepare(`SELECT * FROM expenses ${where} ORDER BY expense_date DESC LIMIT ? OFFSET ?`)
+      .all(...values) as any[];
 
-    const mappedExpenses = (expenses || []).map((expense: any) => ({
+    const mappedExpenses = rows.map((expense) => ({
       id: expense.id,
       description: expense.description,
       category: expense.category,
@@ -106,7 +91,7 @@ export async function GET(request: NextRequest) {
       updatedAt: expense.updated_at,
     }));
 
-    return successResponse(mappedExpenses);
+    return successResponse({ data: mappedExpenses, total, skip, limit });
   } catch (error) {
     console.error('Get expenses error:', error);
     return errorResponse('Internal server error', 500);

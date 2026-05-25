@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { UpdateExpenseRequest } from '@/lib/types';
 
@@ -14,13 +14,9 @@ export async function GET(
       return unauthorizedResponse();
     }
 
-    const { data: expense, error } = await supabaseAdmin
-      .from('expenses')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id) as any;
 
-    if (error || !expense) {
+    if (!expense) {
       return errorResponse('Expense not found', 404);
     }
 
@@ -54,34 +50,32 @@ export async function PUT(
 
     const body: UpdateExpenseRequest = await request.json();
 
-    const { data: existingExpense } = await supabaseAdmin
-      .from('expenses')
-      .select('id')
-      .eq('id', id)
-      .single();
-
+    const existingExpense = db.prepare('SELECT id FROM expenses WHERE id = ?').get(id) as any;
     if (!existingExpense) {
       return errorResponse('Expense not found', 404);
     }
 
-    const updateData: any = {};
-    if (body.description !== undefined) updateData.description = body.description;
-    if (body.category !== undefined) updateData.category = body.category;
-    if (body.amount !== undefined) updateData.amount = body.amount;
-    if (body.expenseDate !== undefined) updateData.expense_date = body.expenseDate;
-    if (body.matchDayId !== undefined) updateData.match_day_id = body.matchDayId;
+    const setClauses: string[] = [];
+    const values: any[] = [];
 
-    const { data: updatedExpense, error } = await supabaseAdmin
-      .from('expenses')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Update expense error:', error);
-      return errorResponse('Failed to update expense', 500);
+    if (body.description !== undefined) { setClauses.push('description = ?'); values.push(body.description); }
+    if (body.category !== undefined) { setClauses.push('category = ?'); values.push(body.category); }
+    if (body.amount !== undefined) { setClauses.push('amount = ?'); values.push(body.amount); }
+    if (body.expenseDate !== undefined) {
+      const d = typeof body.expenseDate === 'string' ? body.expenseDate : new Date(body.expenseDate).toISOString().split('T')[0];
+      setClauses.push('expense_date = ?');
+      values.push(d);
     }
+    if (body.matchDayId !== undefined) { setClauses.push('match_day_id = ?'); values.push(body.matchDayId); }
+
+    const now = new Date().toISOString();
+    setClauses.push('updated_at = ?');
+    values.push(now);
+    values.push(id);
+
+    db.prepare(`UPDATE expenses SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+    const updatedExpense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id) as any;
 
     return successResponse({
       id: updatedExpense.id,
@@ -111,15 +105,7 @@ export async function DELETE(
       return unauthorizedResponse();
     }
 
-    const { error } = await supabaseAdmin
-      .from('expenses')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Delete expense error:', error);
-      return errorResponse('Failed to delete expense', 500);
-    }
+    db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
 
     return new Response(null, { status: 204 });
   } catch (error) {

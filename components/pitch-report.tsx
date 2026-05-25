@@ -195,11 +195,12 @@ export function PitchReport() {
         throw new Error(`Failed to fetch payments: ${response.status} - ${errorText}`)
       }
 
-      const payments: Payment[] = await response.json()
+      const paymentsResp = await response.json()
+      const payments: Payment[] = paymentsResp.data ?? paymentsResp
       allPayments.push(...payments)
       console.log(`✅ Fetched ${payments.length} payments (total: ${allPayments.length})`)
-      
-      hasMore = payments.length === limit
+
+      hasMore = allPayments.length < (paymentsResp.total ?? Infinity) && payments.length === limit
       skip += limit
     }
 

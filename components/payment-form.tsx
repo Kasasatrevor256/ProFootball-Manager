@@ -144,7 +144,7 @@ export function PaymentForm() {
       }
 
       const playersData = await response.json()
-      setPlayers(playersData)
+      setPlayers(playersData.data ?? playersData)
       
     } catch (error) {
       const errorMessage = extractErrorMessage(error)

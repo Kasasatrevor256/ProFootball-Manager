@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { UpdateMatchDayRequest } from '@/lib/types';
 
@@ -14,13 +14,9 @@ export async function GET(
       return unauthorizedResponse();
     }
 
-    const { data: matchDay, error } = await supabaseAdmin
-      .from('match_days')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const matchDay = db.prepare('SELECT * FROM match_days WHERE id = ?').get(id) as any;
 
-    if (error || !matchDay) {
+    if (!matchDay) {
       return errorResponse('Match day not found', 404);
     }
 
@@ -51,33 +47,28 @@ export async function PUT(
 
     const body: UpdateMatchDayRequest = await request.json();
 
-    const { data: existingMatchDay } = await supabaseAdmin
-      .from('match_days')
-      .select('id')
-      .eq('id', id)
-      .single();
-
+    const existingMatchDay = db.prepare('SELECT id FROM match_days WHERE id = ?').get(id) as any;
     if (!existingMatchDay) {
       return errorResponse('Match day not found', 404);
     }
 
-    const updateData: any = {};
-    if (body.matchDate !== undefined) updateData.match_date = body.matchDate;
-    if (body.opponent !== undefined) updateData.opponent = body.opponent;
-    if (body.venue !== undefined) updateData.venue = body.venue;
-    if (body.matchType !== undefined) updateData.match_type = body.matchType;
+    const setClauses: string[] = [];
+    const values: any[] = [];
 
-    const { data: updatedMatchDay, error } = await supabaseAdmin
-      .from('match_days')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Update match day error:', error);
-      return errorResponse('Failed to update match day', 500);
+    if (body.matchDate !== undefined) {
+      const d = typeof body.matchDate === 'string' ? body.matchDate : new Date(body.matchDate).toISOString().split('T')[0];
+      setClauses.push('match_date = ?');
+      values.push(d);
     }
+    if (body.opponent !== undefined) { setClauses.push('opponent = ?'); values.push(body.opponent); }
+    if (body.venue !== undefined) { setClauses.push('venue = ?'); values.push(body.venue); }
+    if (body.matchType !== undefined) { setClauses.push('match_type = ?'); values.push(body.matchType); }
+
+    values.push(id);
+
+    db.prepare(`UPDATE match_days SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+    const updatedMatchDay = db.prepare('SELECT * FROM match_days WHERE id = ?').get(id) as any;
 
     return successResponse({
       id: updatedMatchDay.id,
@@ -104,15 +95,7 @@ export async function DELETE(
       return unauthorizedResponse();
     }
 
-    const { error } = await supabaseAdmin
-      .from('match_days')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Delete match day error:', error);
-      return errorResponse('Failed to delete match day', 500);
-    }
+    db.prepare('DELETE FROM match_days WHERE id = ?').run(id);
 
     return new Response(null, { status: 204 });
   } catch (error) {

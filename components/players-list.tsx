@@ -75,9 +75,9 @@ export function PlayersList() {
       }
 
       const playersData = await response.json()
-      console.log("✅ Players fetched:", playersData.length)
-      
-      setPlayers(playersData)
+      console.log("✅ Players fetched:", (playersData.data ?? playersData).length)
+
+      setPlayers(playersData.data ?? playersData)
     } catch (error) {
       console.error("❌ Error fetching players:", error)
       const errorMessage = error instanceof Error ? error.message : "Failed to load players"

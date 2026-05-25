@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreatePlayerRequest } from '@/lib/types';
+import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,25 +18,17 @@ export async function POST(request: NextRequest) {
       return errorResponse('Name and phone are required', 400);
     }
 
-    const { data: player, error } = await supabaseAdmin
-      .from('players')
-      .insert({
-        name,
-        phone,
-        annual,
-        monthly,
-        pitch,
-        match_day: matchDay || null,
-      })
-      .select()
-      .single();
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
 
-    if (error) {
-      console.error('Create player error:', error);
-      return errorResponse('Failed to create player', 500);
-    }
+    db.prepare(
+      `INSERT INTO players (id, name, phone, annual, monthly, pitch, match_day, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, name, phone, annual, monthly, pitch, matchDay ?? null, now, now);
 
-    const response = {
+    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(id) as any;
+
+    return successResponse({
       id: player.id,
       name: player.name,
       phone: player.phone,
@@ -45,9 +38,7 @@ export async function POST(request: NextRequest) {
       matchDay: player.match_day,
       createdAt: player.created_at,
       updatedAt: player.updated_at,
-    };
-
-    return successResponse(response, 201);
+    }, 201);
   } catch (error) {
     console.error('Create player error:', error);
     return errorResponse('Internal server error', 500);
@@ -66,20 +57,13 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '100');
     const search = searchParams.get('search');
 
-    let query = supabaseAdmin
-      .from('players')
-      .select('*')
-      .order('name', { ascending: true })
-      .range(skip, skip + limit - 1);
+    const total = (db.prepare('SELECT COUNT(*) as count FROM players').get() as any).count;
 
-    const { data: players, error } = await query;
+    const rows = db
+      .prepare('SELECT * FROM players ORDER BY name ASC LIMIT ? OFFSET ?')
+      .all(limit, skip) as any[];
 
-    if (error) {
-      console.error('Get players error:', error);
-      return errorResponse('Failed to fetch players', 500);
-    }
-
-    let filteredPlayers = (players || []).map((player: any) => ({
+    let players = rows.map((player) => ({
       id: player.id,
       name: player.name,
       phone: player.phone,
@@ -93,13 +77,14 @@ export async function GET(request: NextRequest) {
 
     if (search) {
       const searchLower = search.toLowerCase();
-      filteredPlayers = filteredPlayers.filter(player =>
-        player.name.toLowerCase().includes(searchLower) ||
-        player.phone.includes(search)
+      players = players.filter(
+        (player) =>
+          player.name.toLowerCase().includes(searchLower) ||
+          player.phone.includes(search)
       );
     }
 
-    return successResponse(filteredPlayers);
+    return successResponse({ data: players, total, skip, limit });
   } catch (error) {
     console.error('Get players error:', error);
     return errorResponse('Internal server error', 500);

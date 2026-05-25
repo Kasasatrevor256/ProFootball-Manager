@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface DailyFinancialSummary {
@@ -37,26 +37,15 @@ export async function GET(request: NextRequest) {
       return errorResponse('Date parameter is required', 400);
     }
 
-    // Fetch payments and expenses for the selected date
-    const [paymentsResult, expensesResult] = await Promise.all([
-      supabaseAdmin
-        .from('payments')
-        .select('*')
-        .eq('date', date)
-        .order('created_at', { ascending: false }),
-      supabaseAdmin
-        .from('expenses')
-        .select('*')
-        .eq('expense_date', date)
-        .order('created_at', { ascending: false })
-    ]);
+    const paymentRows = db
+      .prepare('SELECT * FROM payments WHERE date = ? ORDER BY created_at DESC')
+      .all(date) as any[];
 
-    if (paymentsResult.error || expensesResult.error) {
-      console.error('Error fetching data:', paymentsResult.error || expensesResult.error);
-      return errorResponse('Failed to fetch data', 500);
-    }
+    const expenseRows = db
+      .prepare('SELECT * FROM expenses WHERE expense_date = ? ORDER BY created_at DESC')
+      .all(date) as any[];
 
-    const payments = (paymentsResult.data || []).map((p: any) => ({
+    const payments = paymentRows.map((p) => ({
       id: p.id,
       playerId: p.player_id,
       playerName: p.player_name,
@@ -66,7 +55,7 @@ export async function GET(request: NextRequest) {
       createdAt: p.created_at,
     }));
 
-    const expenses = (expensesResult.data || []).map((e: any) => ({
+    const expenses = expenseRows.map((e) => ({
       id: e.id,
       category: e.category,
       amount: parseFloat(e.amount.toString()),
@@ -76,30 +65,27 @@ export async function GET(request: NextRequest) {
       createdAt: e.created_at,
     }));
 
-    // Calculate summary statistics
     const totalPayments = payments.reduce((sum, p) => sum + p.amount, 0);
     const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
     const netAmount = totalPayments - totalExpenses;
-    const uniquePlayers = new Set(payments.map(p => p.playerId)).size;
+    const uniquePlayers = new Set(payments.map((p) => p.playerId)).size;
 
-    // Group payments by type
     const paymentsByType = {
       annual: { count: 0, amount: 0 },
       monthly: { count: 0, amount: 0 },
       pitch: { count: 0, amount: 0 },
-      matchday: { count: 0, amount: 0 }
+      matchday: { count: 0, amount: 0 },
     };
 
-    payments.forEach(payment => {
+    payments.forEach((payment) => {
       if (payment.paymentType in paymentsByType) {
         paymentsByType[payment.paymentType as keyof typeof paymentsByType].count++;
         paymentsByType[payment.paymentType as keyof typeof paymentsByType].amount += payment.amount;
       }
     });
 
-    // Group expenses by category
     const expensesByCategory: Record<string, { count: number; amount: number }> = {};
-    expenses.forEach(expense => {
+    expenses.forEach((expense) => {
       if (!expensesByCategory[expense.category]) {
         expensesByCategory[expense.category] = { count: 0, amount: 0 };
       }
@@ -112,17 +98,13 @@ export async function GET(request: NextRequest) {
       payments: payments.sort((a, b) => {
         const timeA = new Date(a.createdAt).getTime();
         const timeB = new Date(b.createdAt).getTime();
-        if (timeA !== timeB) {
-          return timeB - timeA;
-        }
+        if (timeA !== timeB) return timeB - timeA;
         return b.amount - a.amount;
       }),
       expenses: expenses.sort((a, b) => {
         const timeA = new Date(a.createdAt).getTime();
         const timeB = new Date(b.createdAt).getTime();
-        if (timeA !== timeB) {
-          return timeB - timeA;
-        }
+        if (timeA !== timeB) return timeB - timeA;
         return b.amount - a.amount;
       }),
       summary: {
@@ -133,8 +115,8 @@ export async function GET(request: NextRequest) {
         expensesCount: expenses.length,
         uniquePlayers,
         paymentsByType,
-        expensesByCategory
-      }
+        expensesByCategory,
+      },
     };
 
     return successResponse(reportData);
@@ -143,5 +125,3 @@ export async function GET(request: NextRequest) {
     return errorResponse('Internal server error', 500);
   }
 }
-
-

@@ -78,7 +78,7 @@ export function ExpensesList() {
       }
 
       const data = await response.json()
-      setExpenses(data)
+      setExpenses(data.data ?? data)
     } catch (error) {
       console.error("Error loading expenses:", error)
       toast({

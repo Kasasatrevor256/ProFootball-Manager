@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { UpdatePaymentRequest } from '@/lib/types';
 
@@ -14,13 +14,9 @@ export async function GET(
       return unauthorizedResponse();
     }
 
-    const { data: payment, error } = await supabaseAdmin
-      .from('payments')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as any;
 
-    if (error || !payment) {
+    if (!payment) {
       return errorResponse('Payment not found', 404);
     }
 
@@ -54,34 +50,32 @@ export async function PUT(
 
     const body: UpdatePaymentRequest = await request.json();
 
-    const { data: existingPayment } = await supabaseAdmin
-      .from('payments')
-      .select('id')
-      .eq('id', id)
-      .single();
-
+    const existingPayment = db.prepare('SELECT id FROM payments WHERE id = ?').get(id) as any;
     if (!existingPayment) {
       return errorResponse('Payment not found', 404);
     }
 
-    const updateData: any = {};
-    if (body.playerId !== undefined) updateData.player_id = body.playerId;
-    if (body.playerName !== undefined) updateData.player_name = body.playerName;
-    if (body.paymentType !== undefined) updateData.payment_type = body.paymentType;
-    if (body.amount !== undefined) updateData.amount = body.amount;
-    if (body.date !== undefined) updateData.date = body.date;
+    const setClauses: string[] = [];
+    const values: any[] = [];
 
-    const { data: updatedPayment, error } = await supabaseAdmin
-      .from('payments')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Update payment error:', error);
-      return errorResponse('Failed to update payment', 500);
+    if (body.playerId !== undefined) { setClauses.push('player_id = ?'); values.push(body.playerId); }
+    if (body.playerName !== undefined) { setClauses.push('player_name = ?'); values.push(body.playerName); }
+    if (body.paymentType !== undefined) { setClauses.push('payment_type = ?'); values.push(body.paymentType); }
+    if (body.amount !== undefined) { setClauses.push('amount = ?'); values.push(body.amount); }
+    if (body.date !== undefined) {
+      const d = typeof body.date === 'string' ? body.date : new Date(body.date).toISOString().split('T')[0];
+      setClauses.push('date = ?');
+      values.push(d);
     }
+
+    const now = new Date().toISOString();
+    setClauses.push('updated_at = ?');
+    values.push(now);
+    values.push(id);
+
+    db.prepare(`UPDATE payments SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+    const updatedPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as any;
 
     return successResponse({
       id: updatedPayment.id,
@@ -111,15 +105,7 @@ export async function DELETE(
       return unauthorizedResponse();
     }
 
-    const { error } = await supabaseAdmin
-      .from('payments')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Delete payment error:', error);
-      return errorResponse('Failed to delete payment', 500);
-    }
+    db.prepare('DELETE FROM payments WHERE id = ?').run(id);
 
     return new Response(null, { status: 204 });
   } catch (error) {

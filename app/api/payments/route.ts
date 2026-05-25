@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreatePaymentRequest } from '@/lib/types';
+import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,26 +18,20 @@ export async function POST(request: NextRequest) {
       return errorResponse('All required fields must be provided', 400);
     }
 
-    const { data: payment, error } = await supabaseAdmin
-      .from('payments')
-      .insert({
-        player_id: playerId,
-        player_name: playerName,
-        payment_type: paymentType,
-        amount: amount,
-        date: date || new Date().toISOString().split('T')[0],
-        created_by: authUser.uid,
-      })
-      .select()
-      .single();
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const paymentDate = date
+      ? (typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0])
+      : new Date().toISOString().split('T')[0];
 
-    if (error) {
-      console.error('Create payment error:', error);
-      return errorResponse('Failed to create payment', 500, { internal: error, request });
-    }
+    db.prepare(
+      `INSERT INTO payments (id, player_id, player_name, payment_type, amount, date, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, playerId, playerName, paymentType, amount, paymentDate, authUser.uid, now, now);
 
-    // Map snake_case to camelCase for response
-    const response = {
+    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as any;
+
+    return successResponse({
       id: payment.id,
       playerId: payment.player_id,
       playerName: payment.player_name,
@@ -46,9 +41,7 @@ export async function POST(request: NextRequest) {
       createdBy: payment.created_by,
       createdAt: payment.created_at,
       updatedAt: payment.updated_at,
-    };
-
-    return successResponse(response, 201);
+    }, 201);
   } catch (error) {
     console.error('Create payment error:', error);
     return errorResponse('Internal server error', 500, { internal: error, request });
@@ -70,35 +63,23 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('start_date');
     const endDate = searchParams.get('end_date');
 
-    let query = supabaseAdmin
-      .from('payments')
-      .select('*')
-      .order('date', { ascending: false })
-      .range(skip, skip + limit - 1);
+    const conditions: string[] = [];
+    const values: any[] = [];
 
-    // Apply filters
-    if (playerId) {
-      query = query.eq('player_id', playerId);
-    }
-    if (paymentType) {
-      query = query.eq('payment_type', paymentType);
-    }
-    if (startDate) {
-      query = query.gte('date', startDate);
-    }
-    if (endDate) {
-      query = query.lte('date', endDate);
-    }
+    if (playerId) { conditions.push('player_id = ?'); values.push(playerId); }
+    if (paymentType) { conditions.push('payment_type = ?'); values.push(paymentType); }
+    if (startDate) { conditions.push('date >= ?'); values.push(startDate); }
+    if (endDate) { conditions.push('date <= ?'); values.push(endDate); }
 
-    const { data: payments, error } = await query;
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const total = (db.prepare(`SELECT COUNT(*) as count FROM payments ${where}`).get(...values) as any).count;
+    values.push(limit, skip);
 
-    if (error) {
-      console.error('Get payments error:', error);
-      return errorResponse('Failed to fetch payments', 500, { internal: error, request });
-    }
+    const rows = db
+      .prepare(`SELECT * FROM payments ${where} ORDER BY date DESC LIMIT ? OFFSET ?`)
+      .all(...values) as any[];
 
-    // Map snake_case to camelCase for frontend
-    const mappedPayments = (payments || []).map((payment: any) => ({
+    const mappedPayments = rows.map((payment) => ({
       id: payment.id,
       playerId: payment.player_id,
       playerName: payment.player_name,
@@ -110,7 +91,7 @@ export async function GET(request: NextRequest) {
       updatedAt: payment.updated_at,
     }));
 
-    return successResponse(mappedPayments);
+    return successResponse({ data: mappedPayments, total, skip, limit });
   } catch (error) {
     console.error('Get payments error:', error);
     return errorResponse('Internal server error', 500, { internal: error, request });

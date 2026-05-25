@@ -1,13 +1,76 @@
 {
-  "name": "my-v0-project",
-  "version": "0.1.0",
+  "name": "munyonyo-soccer-team",
+  "version": "1.0.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "firebase:init": "ts-node scripts/init-firebase.ts"
+    "firebase:init": "ts-node scripts/init-firebase.ts",
+    "electron:dev": "concurrently -n next,electron -c blue,green \"next dev --port 3456\" \"wait-on http://localhost:3456 && electron .\"",
+    "electron:build": "next build && node scripts/rebuild-sqlite.js && electron-builder",
+    "electron:build:linux": "next build && node scripts/rebuild-sqlite.js && electron-builder --linux",
+    "electron:build:win": "next build && node scripts/rebuild-sqlite.js && electron-builder --win",
+    "electron:build:mac": "next build && node scripts/rebuild-sqlite.js && electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.munyonyo.soccerteam",
+    "productName": "Munyonyo Soccer Team",
+    "copyright": "Copyright © 2024 Munyonyo Soccer Team",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "server"
+      },
+      {
+        "from": ".next/static",
+        "to": "server/.next/static"
+      },
+      {
+        "from": "public",
+        "to": "server/public"
+      },
+      {
+        "from": ".env.local",
+        "to": ".env.local"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/placeholder-logo.png"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "public/placeholder-logo.png",
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "public/placeholder-logo.png",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "engines": {
     "node": ">=18.0.0",
@@ -43,9 +106,8 @@
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
     "@supabase/supabase-js": "^2.86.0",
-    "@types/bcrypt": "^6.0.0",
     "autoprefixer": "^10.4.20",
-    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
@@ -73,12 +135,17 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
+    "electron": "^36.9.5",
+    "electron-builder": "^25.1.8",
     "postcss": "^8",
     "tailwindcss": "^3.4.17",
     "ts-node": "^10.9.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^8.0.5"
   }
 }

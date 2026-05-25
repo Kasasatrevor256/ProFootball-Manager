@@ -101,10 +101,11 @@ export function DailyPaymentReport(){
         throw new Error(`Failed to fetch payments: ${response.status} - ${errorText}`)
       }
 
-      const payments: Payment[] = await response.json()
+      const paymentsResp = await response.json()
+      const payments: Payment[] = paymentsResp.data ?? paymentsResp
       allPayments.push(...payments)
-      
-      hasMore = payments.length === limit
+
+      hasMore = allPayments.length < (paymentsResp.total ?? Infinity) && payments.length === limit
       skip += limit
     }
 
@@ -133,10 +134,11 @@ export function DailyPaymentReport(){
           throw new Error(`Failed to fetch expenses: ${response.status}`)
         }
 
-        const expenses: Expense[] = await response.json()
+        const expensesResp = await response.json()
+        const expenses: Expense[] = expensesResp.data ?? expensesResp
         allExpenses.push(...expenses)
-        
-        hasMore = expenses.length === limit
+
+        hasMore = allExpenses.length < (expensesResp.total ?? Infinity) && expenses.length === limit
         skip += limit
       } catch (error) {
         console.error("Error fetching expenses:", error)

@@ -110,10 +110,10 @@ export function EditPaymentForm({ paymentId }: EditPaymentFormProps) {
       ])
 
       console.log("✅ Payment data fetched:", paymentData)
-      console.log("✅ Players data fetched:", playersData.length)
-      
+      console.log("✅ Players data fetched:", (playersData.data ?? playersData).length)
+
       setPayment(paymentData)
-      setPlayers(playersData)
+      setPlayers(playersData.data ?? playersData)
       
       // Populate form with existing payment data
       setFormData({

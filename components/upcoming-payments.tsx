@@ -380,8 +380,10 @@ const calculatePaymentStatus = (player: Player, payments: Payment[]): PlayerPaym
         throw new Error(`Failed to load payments: ${paymentsResponse.status}`)
       }
 
-      const players: Player[] = await playersResponse.json()
-      const payments: Payment[] = await paymentsResponse.json()
+      const playersResp = await playersResponse.json()
+      const paymentsResp = await paymentsResponse.json()
+      const players: Player[] = playersResp.data ?? playersResp
+      const payments: Payment[] = paymentsResp.data ?? paymentsResp
 
       console.log("✅ Loaded:", players.length, "players and", payments.length, "payments")
 

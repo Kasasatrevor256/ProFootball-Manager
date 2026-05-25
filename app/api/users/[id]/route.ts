@@ -1,8 +1,10 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, forbiddenResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { UpdateUserRequest, UserRole } from '@/lib/types';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
+
+type UpdateUserBody = UpdateUserRequest & { password?: string };
 
 export async function GET(
   request: NextRequest,
@@ -15,13 +17,11 @@ export async function GET(
       return unauthorizedResponse();
     }
 
-    const { data: user, error } = await supabaseAdmin
-      .from('users')
-      .select('id, name, email, role, status, created_at, updated_at')
-      .eq('id', id)
-      .single();
+    const user = db
+      .prepare('SELECT id, name, email, role, status, created_at, updated_at FROM users WHERE id = ?')
+      .get(id) as any;
 
-    if (error || !user) {
+    if (!user) {
       return errorResponse('User not found', 404);
     }
 
@@ -52,51 +52,47 @@ export async function PUT(
     }
 
     // Get current user's role
-    const { data: currentUser } = await supabaseAdmin
-      .from('users')
-      .select('role')
-      .eq('id', authUser.uid)
-      .single();
+    const currentUser = db
+      .prepare('SELECT role FROM users WHERE id = ?')
+      .get(authUser.uid) as any;
 
     // Users can only update their own profile unless they're admin
     if (authUser.uid !== id && currentUser?.role !== UserRole.ADMIN) {
       return forbiddenResponse('Not enough permissions');
     }
 
-    const body: UpdateUserRequest = await request.json();
+    const body: UpdateUserBody = await request.json();
 
-    // Get existing user
-    const { data: existingUser } = await supabaseAdmin
-      .from('users')
-      .select('id')
-      .eq('id', id)
-      .single();
-
+    // Check user exists
+    const existingUser = db.prepare('SELECT id FROM users WHERE id = ?').get(id) as any;
     if (!existingUser) {
       return errorResponse('User not found', 404);
     }
 
-    // Prepare update data
-    const updateData: any = {};
-    if (body.name) updateData.name = body.name;
-    if (body.email) updateData.email = body.email;
-    if (body.role) updateData.role = body.role;
-    if (body.status) updateData.status = body.status;
+    // Build dynamic SET clause
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    if (body.name) { setClauses.push('name = ?'); values.push(body.name); }
+    if (body.email) { setClauses.push('email = ?'); values.push(body.email); }
+    if (body.role) { setClauses.push('role = ?'); values.push(body.role); }
+    if (body.status) { setClauses.push('status = ?'); values.push(body.status); }
     if (body.password) {
-      updateData.password_hash = await bcrypt.hash(body.password, 10);
+      const passwordHash = await bcrypt.hash(body.password, 10);
+      setClauses.push('password_hash = ?');
+      values.push(passwordHash);
     }
 
-    const { data: updatedUser, error } = await supabaseAdmin
-      .from('users')
-      .update(updateData)
-      .eq('id', id)
-      .select('id, name, email, role, status, created_at, updated_at')
-      .single();
+    const now = new Date().toISOString();
+    setClauses.push('updated_at = ?');
+    values.push(now);
+    values.push(id);
 
-    if (error) {
-      console.error('Update user error:', error);
-      return errorResponse('Failed to update user', 500);
-    }
+    db.prepare(`UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+    const updatedUser = db
+      .prepare('SELECT id, name, email, role, status, created_at, updated_at FROM users WHERE id = ?')
+      .get(id) as any;
 
     return successResponse({
       id: updatedUser.id,
@@ -124,26 +120,13 @@ export async function DELETE(
       return unauthorizedResponse();
     }
 
-    // Check if admin
-    const { data: currentUser } = await supabaseAdmin
-      .from('users')
-      .select('role')
-      .eq('id', authUser.uid)
-      .single();
+    const currentUser = db.prepare('SELECT role FROM users WHERE id = ?').get(authUser.uid) as any;
 
     if (!currentUser || currentUser.role !== UserRole.ADMIN) {
       return forbiddenResponse('Admin access required');
     }
 
-    const { error } = await supabaseAdmin
-      .from('users')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Delete user error:', error);
-      return errorResponse('Failed to delete user', 500);
-    }
+    db.prepare('DELETE FROM users WHERE id = ?').run(id);
 
     return new Response(null, { status: 204 });
   } catch (error) {

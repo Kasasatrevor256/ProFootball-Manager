@@ -208,9 +208,10 @@ export function MonthlyReport() {
         throw new Error(`Failed to fetch payments: ${response.status}`)
       }
 
-      const payments: Payment[] = await response.json()
+      const paymentsResp = await response.json()
+      const payments: Payment[] = paymentsResp.data ?? paymentsResp
       allPayments.push(...payments)
-      hasMore = payments.length === limit
+      hasMore = allPayments.length < (paymentsResp.total ?? Infinity) && payments.length === limit
       skip += limit
     }
 

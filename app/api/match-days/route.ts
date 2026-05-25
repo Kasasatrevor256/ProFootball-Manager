@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { CreateMatchDayRequest } from '@/lib/types';
+import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,33 +18,26 @@ export async function POST(request: NextRequest) {
       return errorResponse('Match date and match type are required', 400);
     }
 
+    const matchDateStr = typeof matchDate === 'string' ? matchDate : new Date(matchDate).toISOString().split('T')[0];
+
     // Check if match day already exists for this date
-    const { data: existingMatch } = await supabaseAdmin
-      .from('match_days')
-      .select('id')
-      .eq('match_date', matchDate)
-      .limit(1)
-      .single();
+    const existingMatch = db
+      .prepare('SELECT id FROM match_days WHERE match_date = ? LIMIT 1')
+      .get(matchDateStr) as any;
 
     if (existingMatch) {
       return errorResponse('Match day already exists for this date', 400);
     }
 
-    const { data: matchDay, error } = await supabaseAdmin
-      .from('match_days')
-      .insert({
-        match_date: matchDate,
-        opponent: opponent || null,
-        venue: venue || null,
-        match_type: matchType,
-      })
-      .select()
-      .single();
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
 
-    if (error) {
-      console.error('Create match day error:', error);
-      return errorResponse('Failed to create match day', 500);
-    }
+    db.prepare(
+      `INSERT INTO match_days (id, match_date, opponent, venue, match_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(id, matchDateStr, opponent ?? null, venue ?? null, matchType, now);
+
+    const matchDay = db.prepare('SELECT * FROM match_days WHERE id = ?').get(id) as any;
 
     return successResponse({
       id: matchDay.id,
@@ -70,18 +64,13 @@ export async function GET(request: NextRequest) {
     const skip = parseInt(searchParams.get('skip') || '0');
     const limit = parseInt(searchParams.get('limit') || '100');
 
-    const { data: matchDays, error } = await supabaseAdmin
-      .from('match_days')
-      .select('*')
-      .order('match_date', { ascending: false })
-      .range(skip, skip + limit - 1);
+    const total = (db.prepare('SELECT COUNT(*) as count FROM match_days').get() as any).count;
 
-    if (error) {
-      console.error('Get match days error:', error);
-      return errorResponse('Failed to fetch match days', 500);
-    }
+    const rows = db
+      .prepare('SELECT * FROM match_days ORDER BY match_date DESC LIMIT ? OFFSET ?')
+      .all(limit, skip) as any[];
 
-    const mappedMatchDays = (matchDays || []).map((matchDay: any) => ({
+    const mappedMatchDays = rows.map((matchDay) => ({
       id: matchDay.id,
       matchDate: matchDay.match_date,
       opponent: matchDay.opponent,
@@ -90,7 +79,7 @@ export async function GET(request: NextRequest) {
       createdAt: matchDay.created_at,
     }));
 
-    return successResponse(mappedMatchDays);
+    return successResponse({ data: mappedMatchDays, total, skip, limit });
   } catch (error) {
     console.error('Get match days error:', error);
     return errorResponse('Internal server error', 500);

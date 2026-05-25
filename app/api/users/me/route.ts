@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 export async function GET(request: NextRequest) {
@@ -9,13 +9,11 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    const { data: user, error } = await supabaseAdmin
-      .from('users')
-      .select('id, name, email, role, status, created_at, updated_at')
-      .eq('id', authUser.uid)
-      .single();
+    const user = db
+      .prepare('SELECT id, name, email, role, status, created_at, updated_at FROM users WHERE id = ?')
+      .get(authUser.uid) as any;
 
-    if (error || !user) {
+    if (!user) {
       return errorResponse('User not found', 404);
     }
 

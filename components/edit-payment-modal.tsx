@@ -91,9 +91,9 @@ export function EditPaymentModal({ isOpen, onClose, payment, onPaymentUpdated }:
       }
 
       const playersData = await response.json()
-      console.log("✅ Players fetched for payment edit:", playersData.length)
-      
-      setPlayers(playersData)
+      console.log("✅ Players fetched for payment edit:", (playersData.data ?? playersData).length)
+
+      setPlayers(playersData.data ?? playersData)
     } catch (error) {
       console.error("❌ Error fetching players:", error)
       const errorMessage = error instanceof Error ? error.message : "Failed to load players"

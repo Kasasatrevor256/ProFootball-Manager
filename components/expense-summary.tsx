@@ -59,7 +59,7 @@ export function ExpenseSummary() {
         }
 
         const data = await response.json()
-        setExpenses(data)
+        setExpenses(data.data ?? data)
       } catch (error) {
         console.error("Error loading recent expenses:", error)
         toast({

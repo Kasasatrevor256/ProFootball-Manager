@@ -84,7 +84,8 @@ export function AnnualReport() {
         return 0
       }
 
-      const allPayments = await response.json()
+      const paymentsResp = await response.json()
+      const allPayments = paymentsResp.data ?? paymentsResp
 
       // Filter for this player's annual payments in the previous year
       const playerPayments = allPayments.filter((payment: any) => {

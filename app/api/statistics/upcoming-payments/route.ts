@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface PlayerPaymentStatus {
@@ -35,18 +35,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '10');
 
-    // Fetch players and payments in parallel
-    const [playersResult, paymentsResult] = await Promise.all([
-      supabaseAdmin.from('players').select('*'),
-      supabaseAdmin.from('payments').select('*').order('date', { ascending: false })
-    ]);
+    const playerRows = db.prepare('SELECT * FROM players').all() as any[];
+    const paymentRows = db
+      .prepare('SELECT * FROM payments ORDER BY date DESC')
+      .all() as any[];
 
-    if (playersResult.error || paymentsResult.error) {
-      console.error('Error fetching data:', playersResult.error || paymentsResult.error);
-      return errorResponse('Failed to fetch data', 500);
-    }
-
-    const players = (playersResult.data || []).map((p: any) => ({
+    const players = playerRows.map((p) => ({
       id: p.id,
       name: p.name,
       phone: p.phone,
@@ -55,7 +49,7 @@ export async function GET(request: NextRequest) {
       pitch: parseFloat(p.pitch.toString()),
     }));
 
-    const payments = (paymentsResult.data || []).map((p: any) => ({
+    const payments = paymentRows.map((p) => ({
       id: p.id,
       playerId: p.player_id,
       playerName: p.player_name,
@@ -71,28 +65,26 @@ export async function GET(request: NextRequest) {
     const playersWithStatus: PlayerPaymentStatus[] = [];
 
     for (const player of players) {
-      const playerPayments = payments.filter((p: any) => p.playerId === player.id);
+      const playerPayments = payments.filter((p) => p.playerId === player.id);
       const lastPayment = playerPayments.length > 0 ? playerPayments[0] : null;
 
-      // Simplified calculation for fiscal year (July-June)
-      const fiscalStartMonth = 7; // July
+      const fiscalStartMonth = 7;
       let fiscalYear = currentYear;
       if (currentMonth < fiscalStartMonth) {
         fiscalYear = currentYear - 1;
       }
 
       const fiscalYearStart = new Date(fiscalYear, fiscalStartMonth - 1, 1);
-      const monthsSinceFiscalStart = Math.floor((now.getTime() - fiscalYearStart.getTime()) / (30.44 * 24 * 60 * 60 * 1000));
+      const monthsSinceFiscalStart = Math.floor(
+        (now.getTime() - fiscalYearStart.getTime()) / (30.44 * 24 * 60 * 60 * 1000)
+      );
 
-      // Check annual payment
-      const annualPayments = playerPayments.filter((p: any) =>
-        p.paymentType === 'annual' &&
-        new Date(p.date) >= fiscalYearStart
+      const annualPayments = playerPayments.filter(
+        (p) => p.paymentType === 'annual' && new Date(p.date) >= fiscalYearStart
       );
       const hasAnnual = annualPayments.length > 0;
 
-      // Check monthly payments
-      const monthlyPayments = playerPayments.filter((p: any) => {
+      const monthlyPayments = playerPayments.filter((p) => {
         const paymentDate = new Date(p.date);
         return p.paymentType === 'monthly' && paymentDate >= fiscalYearStart;
       });
@@ -101,13 +93,11 @@ export async function GET(request: NextRequest) {
       let isDue = false;
       let isOverdue = false;
       let daysOverdue = 0;
-      let expectedAmount = player.monthly;
-      let paymentType = 'monthly';
-      let nextDueDate: Date | null = null;
+      const expectedAmount = player.monthly;
+      const paymentType = 'monthly';
       let status: 'up_to_date' | 'due_soon' | 'overdue' = 'up_to_date';
 
       if (!hasAnnual) {
-        // No annual payment - check monthly
         const expectedMonthlyPayments = monthsSinceFiscalStart + 1;
         if (monthlyPaid < expectedMonthlyPayments) {
           isDue = true;
@@ -132,23 +122,24 @@ export async function GET(request: NextRequest) {
             monthly: player.monthly,
             pitch: player.pitch,
           },
-          lastPayment: lastPayment ? {
-            paymentType: lastPayment.paymentType,
-            amount: lastPayment.amount,
-            date: lastPayment.date
-          } : null,
+          lastPayment: lastPayment
+            ? {
+                paymentType: lastPayment.paymentType,
+                amount: lastPayment.amount,
+                date: lastPayment.date,
+              }
+            : null,
           isDue,
           isOverdue,
           daysOverdue,
           expectedAmount,
           paymentType,
-          nextDueDate: nextDueDate ? nextDueDate.toISOString() : null,
-          status
+          nextDueDate: null,
+          status,
         });
       }
     }
 
-    // Sort by most overdue first
     playersWithStatus.sort((a, b) => b.daysOverdue - a.daysOverdue);
 
     return successResponse(playersWithStatus.slice(0, limit));

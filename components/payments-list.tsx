@@ -91,9 +91,10 @@ export function PaymentsList() {
         }
 
         const paymentsData = await response.json()
-        allPayments.push(...paymentsData)
-        
-        hasMore = paymentsData.length === limit
+        const page = paymentsData.data ?? paymentsData
+        allPayments.push(...page)
+
+        hasMore = allPayments.length < (paymentsData.total ?? Infinity) && page.length === limit
         skip += limit
       }
 

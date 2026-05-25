@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 export async function GET(request: NextRequest) {
@@ -14,20 +14,15 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '100');
     const search = searchParams.get('search');
 
-    let query = supabaseAdmin
-      .from('users')
-      .select('id, name, email, role, status, created_at, updated_at')
-      .order('created_at', { ascending: false })
-      .range(skip, skip + limit - 1);
+    const total = (db.prepare('SELECT COUNT(*) as count FROM users').get() as any).count;
 
-    const { data: users, error } = await query;
+    const rows = db
+      .prepare(
+        'SELECT id, name, email, role, status, created_at, updated_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      )
+      .all(limit, skip) as any[];
 
-    if (error) {
-      console.error('Get users error:', error);
-      return errorResponse('Failed to fetch users', 500);
-    }
-
-    let filteredUsers = (users || []).map((user: any) => ({
+    let users = rows.map((user) => ({
       id: user.id,
       name: user.name,
       email: user.email,
@@ -37,16 +32,16 @@ export async function GET(request: NextRequest) {
       updatedAt: user.updated_at,
     }));
 
-    // Apply search filter if provided
     if (search) {
       const searchLower = search.toLowerCase();
-      filteredUsers = filteredUsers.filter(user => 
-        user.name.toLowerCase().includes(searchLower) ||
-        user.email.toLowerCase().includes(searchLower)
+      users = users.filter(
+        (user) =>
+          user.name.toLowerCase().includes(searchLower) ||
+          user.email.toLowerCase().includes(searchLower)
       );
     }
 
-    return successResponse(filteredUsers);
+    return successResponse({ data: users, total, skip, limit });
   } catch (error) {
     console.error('Get users error:', error);
     return errorResponse('Internal server error', 500);

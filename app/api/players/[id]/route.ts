@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 import { UpdatePlayerRequest } from '@/lib/types';
 
@@ -14,13 +14,9 @@ export async function GET(
     }
 
     const { id } = await params;
-    const { data: player, error } = await supabaseAdmin
-      .from('players')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(id) as any;
 
-    if (error || !player) {
+    if (!player) {
       return errorResponse('Player not found', 404);
     }
 
@@ -54,35 +50,29 @@ export async function PUT(
     const { id } = await params;
     const body: UpdatePlayerRequest = await request.json();
 
-    const { data: existingPlayer } = await supabaseAdmin
-      .from('players')
-      .select('id')
-      .eq('id', id)
-      .single();
-
+    const existingPlayer = db.prepare('SELECT id FROM players WHERE id = ?').get(id) as any;
     if (!existingPlayer) {
       return errorResponse('Player not found', 404);
     }
 
-    const updateData: any = {};
-    if (body.name !== undefined) updateData.name = body.name;
-    if (body.phone !== undefined) updateData.phone = body.phone;
-    if (body.annual !== undefined) updateData.annual = body.annual;
-    if (body.monthly !== undefined) updateData.monthly = body.monthly;
-    if (body.pitch !== undefined) updateData.pitch = body.pitch;
-    if (body.matchDay !== undefined) updateData.match_day = body.matchDay;
+    const setClauses: string[] = [];
+    const values: any[] = [];
 
-    const { data: updatedPlayer, error } = await supabaseAdmin
-      .from('players')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
+    if (body.name !== undefined) { setClauses.push('name = ?'); values.push(body.name); }
+    if (body.phone !== undefined) { setClauses.push('phone = ?'); values.push(body.phone); }
+    if (body.annual !== undefined) { setClauses.push('annual = ?'); values.push(body.annual); }
+    if (body.monthly !== undefined) { setClauses.push('monthly = ?'); values.push(body.monthly); }
+    if (body.pitch !== undefined) { setClauses.push('pitch = ?'); values.push(body.pitch); }
+    if (body.matchDay !== undefined) { setClauses.push('match_day = ?'); values.push(body.matchDay); }
 
-    if (error) {
-      console.error('Update player error:', error);
-      return errorResponse('Failed to update player', 500);
-    }
+    const now = new Date().toISOString();
+    setClauses.push('updated_at = ?');
+    values.push(now);
+    values.push(id);
+
+    db.prepare(`UPDATE players SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+
+    const updatedPlayer = db.prepare('SELECT * FROM players WHERE id = ?').get(id) as any;
 
     return successResponse({
       id: updatedPlayer.id,
@@ -112,15 +102,7 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const { error } = await supabaseAdmin
-      .from('players')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Delete player error:', error);
-      return errorResponse('Failed to delete player', 500);
-    }
+    db.prepare('DELETE FROM players WHERE id = ?').run(id);
 
     return new Response(null, { status: 204 });
   } catch (error) {

@@ -129,11 +129,13 @@ export function MatchDayReport() {
         throw new Error("Failed to load initial data")
       }
 
-      const playersData = await playersRes.json()
-      const matchDaysData = await matchDaysRes.json()
+      const playersResp = await playersRes.json()
+      const matchDaysResp = await matchDaysRes.json()
+      const playersData = playersResp.data ?? playersResp
+      const matchDaysData = matchDaysResp.data ?? matchDaysResp
 
       setPlayers(playersData)
-      setMatchDays(matchDaysData.sort((a: MatchDay, b: MatchDay) => 
+      setMatchDays(matchDaysData.sort((a: MatchDay, b: MatchDay) =>
         new Date(b.match_date).getTime() - new Date(a.match_date).getTime()
       ))
 

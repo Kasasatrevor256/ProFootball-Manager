@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { db } from '@/lib/db';
 import { getAuthUser, unauthorizedResponse, successResponse, errorResponse } from '@/lib/auth-utils';
 
 interface PlayerMonthlyData {
@@ -28,18 +28,12 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month') || 'all';
     const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString());
 
-    // Fetch all players and payments in parallel
-    const [playersResult, paymentsResult] = await Promise.all([
-      supabaseAdmin.from('players').select('*'),
-      supabaseAdmin.from('payments').select('*').order('date', { ascending: false })
-    ]);
+    const playerRows = db.prepare('SELECT * FROM players').all() as any[];
+    const paymentRows = db
+      .prepare('SELECT * FROM payments ORDER BY date DESC')
+      .all() as any[];
 
-    if (playersResult.error || paymentsResult.error) {
-      console.error('Error fetching data:', playersResult.error || paymentsResult.error);
-      return errorResponse('Failed to fetch data', 500);
-    }
-
-    const players = (playersResult.data || []).map((p: any) => ({
+    const players = playerRows.map((p) => ({
       id: p.id,
       name: p.name,
       phone: p.phone,
@@ -47,7 +41,7 @@ export async function GET(request: NextRequest) {
       annual: parseFloat(p.annual.toString()),
     }));
 
-    const allPayments = (paymentsResult.data || []).map((p: any) => ({
+    const allPayments = paymentRows.map((p) => ({
       id: p.id,
       playerId: p.player_id,
       playerName: p.player_name,
@@ -57,14 +51,12 @@ export async function GET(request: NextRequest) {
     }));
 
     const reportData: PlayerMonthlyData[] = [];
-    const fiscalStartMonth = 7; // July
+    const fiscalStartMonth = 7;
     const currentDate = new Date();
 
-    // Determine months to process
     let monthsToProcess: string[] = [];
-    
+
     if (month === 'all') {
-      // Generate all months from July 2025 to current
       for (let y = 2025; y <= currentDate.getFullYear(); y++) {
         const startMonth = y === 2025 ? 7 : 1;
         const endMonth = y === currentDate.getFullYear() ? currentDate.getMonth() + 1 : 12;
@@ -76,39 +68,40 @@ export async function GET(request: NextRequest) {
       monthsToProcess.push(`${year}-${String(parseInt(month)).padStart(2, '0')}`);
     }
 
-    // Process each player and month combination
     for (const player of players) {
       for (const monthKey of monthsToProcess) {
         const [yearStr, monthStr] = monthKey.split('-');
         const yearNum = parseInt(yearStr);
         const monthNum = parseInt(monthStr);
-        
+
         const monthStart = new Date(yearNum, monthNum - 1, 1);
         const monthEnd = new Date(yearNum, monthNum, 0, 23, 59, 59);
 
-        // Get monthly payments for this player and month
-        const monthlyPayments = allPayments.filter(p => {
+        const monthlyPayments = allPayments.filter((p) => {
           const paymentDate = new Date(p.date);
-          return p.playerId === player.id &&
-                 p.paymentType === 'monthly' &&
-                 paymentDate >= monthStart &&
-                 paymentDate <= monthEnd;
+          return (
+            p.playerId === player.id &&
+            p.paymentType === 'monthly' &&
+            paymentDate >= monthStart &&
+            paymentDate <= monthEnd
+          );
         });
 
-        // Calculate carryover from previous months
         let carryoverAmount = 0;
         if (monthNum > fiscalStartMonth || yearNum > 2025) {
-          // Calculate carryover from fiscal year start to this month
           const fiscalYearStart = new Date(yearNum >= 2026 ? yearNum - 1 : 2025, fiscalStartMonth - 1, 1);
-          const monthsSinceFiscalStart = Math.floor((monthStart.getTime() - fiscalYearStart.getTime()) / (30.44 * 24 * 60 * 60 * 1000));
-          
-          // Get all monthly payments from fiscal start to this month
-          const fiscalPayments = allPayments.filter(p => {
+          const monthsSinceFiscalStart = Math.floor(
+            (monthStart.getTime() - fiscalYearStart.getTime()) / (30.44 * 24 * 60 * 60 * 1000)
+          );
+
+          const fiscalPayments = allPayments.filter((p) => {
             const paymentDate = new Date(p.date);
-            return p.playerId === player.id &&
-                   p.paymentType === 'monthly' &&
-                   paymentDate >= fiscalYearStart &&
-                   paymentDate < monthStart;
+            return (
+              p.playerId === player.id &&
+              p.paymentType === 'monthly' &&
+              paymentDate >= fiscalYearStart &&
+              paymentDate < monthStart
+            );
           });
 
           const expectedPayments = monthsSinceFiscalStart;
@@ -123,8 +116,8 @@ export async function GET(request: NextRequest) {
         const balance = Math.max(0, totalAmount - amountPaid);
         const status: 'Complete' | 'Incomplete' = balance <= 0 ? 'Complete' : 'Incomplete';
 
-        const sortedPayments = monthlyPayments.sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
+        const sortedPayments = monthlyPayments.sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
         );
         const lastPaymentDate = sortedPayments.length > 0 ? sortedPayments[0].date : null;
 
@@ -145,17 +138,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Calculate summary
     const summary = {
       month: month === 'all' ? 'all' : parseInt(month),
       year,
-      totalPlayers: new Set(reportData.map(r => r.playerId)).size,
+      totalPlayers: new Set(reportData.map((r) => r.playerId)).size,
       totalExpected: reportData.reduce((sum, p) => sum + p.totalAmount, 0),
       totalPaid: reportData.reduce((sum, p) => sum + p.amountPaid, 0),
       totalBalance: reportData.reduce((sum, p) => sum + p.balance, 0),
       totalCarryover: reportData.reduce((sum, p) => sum + p.carryoverAmount, 0),
-      completeCount: reportData.filter(p => p.status === 'Complete').length,
-      incompleteCount: reportData.filter(p => p.status === 'Incomplete').length,
+      completeCount: reportData.filter((p) => p.status === 'Complete').length,
+      incompleteCount: reportData.filter((p) => p.status === 'Incomplete').length,
     };
 
     return successResponse({

@@ -66,9 +66,9 @@ export function UsersList() {
       }
 
       const usersData = await response.json()
-      console.log("✅ Users fetched:", usersData.length)
-      
-      setUsers(usersData)
+      console.log("✅ Users fetched:", (usersData.data ?? usersData).length)
+
+      setUsers(usersData.data ?? usersData)
     } catch (error) {
       console.error("❌ Error fetching users:", error)
       const errorMessage = error instanceof Error ? error.message : "Failed to load users"
